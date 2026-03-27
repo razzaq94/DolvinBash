@@ -17,6 +17,8 @@ export default class RoundManager {
         this.lastResult = null;
         this.hitHazard = false;
         this.currentPattern = null;
+        this.currentSpeedMode = GAME_CONFIG.round.defaultSpeedMode || "NORMAL";
+        this.currentVolatility = GAME_CONFIG.round.defaultVolatility || "NORMAL";
     }
 
     startPrototypeRound() {
@@ -30,6 +32,13 @@ export default class RoundManager {
         this.hitHazard = false;
 
         this.currentBet = this.uiManager.getCurrentBet();
+        this.currentSpeedMode = this.uiManager.getSpeedMode();
+        this.currentVolatility = this.uiManager.getVolatility();
+        this.dollController.setRoundTuning?.(this.currentSpeedMode);
+        this.interactionSystem.setRoundTuning?.({
+            speedMode: this.currentSpeedMode,
+            volatility: this.currentVolatility
+        });
         this.currentPattern = this.pickEncounterPattern();
 
         this.scene.resetCamera();
@@ -40,6 +49,8 @@ export default class RoundManager {
         this.emitHostEvent("onDolvinRoundStart", {
             betAmount: this.currentBet,
             patternId: this.currentPattern?.id || "",
+            speedMode: this.currentSpeedMode,
+            volatility: this.currentVolatility,
             state: "STARTING"
         });
 
@@ -55,22 +66,34 @@ export default class RoundManager {
     pickEncounterPattern() {
         const patterns = GAME_CONFIG.encounters.patterns;
         if (!patterns.length) return null;
+        const volatilityCfg = GAME_CONFIG.volatilityModes?.[this.currentVolatility] || GAME_CONFIG.volatilityModes?.NORMAL || {};
+        const hazardWeightMultiplier = volatilityCfg.hazardWeightMultiplier ?? 1;
 
         let totalWeight = 0;
         for (let i = 0; i < patterns.length; i++) {
-            totalWeight += Math.max(0, patterns[i].weight ?? 1);
+            const pattern = patterns[i];
+            const baseWeight = Math.max(0, pattern.weight ?? 1);
+            const hazardCount = (pattern.items || []).filter((item) => item.type === "hazard").length;
+            const adjustedWeight = baseWeight * Math.max(0.25, 1 + ((hazardWeightMultiplier - 1) * hazardCount * 0.35));
+            totalWeight += adjustedWeight;
         }
+
+        const totalWeightInt = Math.max(1, Math.round(totalWeight));
 
         if (totalWeight <= 0) {
             return patterns[Phaser.Math.Between(0, patterns.length - 1)];
         }
 
-        let roll = Phaser.Math.Between(1, totalWeight);
+        let roll = Phaser.Math.Between(1, totalWeightInt);
 
         for (let i = 0; i < patterns.length; i++) {
-            roll -= Math.max(0, patterns[i].weight ?? 1);
+            const pattern = patterns[i];
+            const baseWeight = Math.max(0, pattern.weight ?? 1);
+            const hazardCount = (pattern.items || []).filter((item) => item.type === "hazard").length;
+            const adjustedWeight = baseWeight * Math.max(0.25, 1 + ((hazardWeightMultiplier - 1) * hazardCount * 0.35));
+            roll -= adjustedWeight;
             if (roll <= 0) {
-                return patterns[i];
+                return pattern;
             }
         }
 
@@ -92,10 +115,16 @@ export default class RoundManager {
                 this.finishRound(false);
             };
 
-            this.interactionSystem.onHazardHit = () => {
+            this.interactionSystem.onHazardHit = (item, isFatal) => {
                 this.scene.shakeOnHazard();
-                this.dollController.stopMovement();
-                this.finishRound(true);
+                if (isFatal) {
+                    // Trigger the cinematic hole-fall sequence instead of instant end
+                    this.dollController.onHoleFallComplete = () => {
+                        this.finishRound(true);
+                    };
+                    this.dollController.fallIntoHole(item.x, item.shape);
+                }
+                // No finishRound if not fatal - just let the downward impulse work
             };
         }));
     }
@@ -120,27 +149,46 @@ export default class RoundManager {
         }
 
         const multiplier = this.interactionSystem.getMultiplier();
+        const travelStats = this.dollController.getTravelStats?.() || null;
 
         this.lastResult = this.resultSystem.calculate(
             this.currentBet,
             multiplier,
             hitHazard,
-            this.interactionSystem.getMaxCombo()
+            this.interactionSystem.getMaxCombo(),
+            travelStats
         );
 
         this.lastResult.patternId = this.interactionSystem.getPatternId();
 
         this.pushEvent(this.scene.time.delayedCall(500, () => {
             this.gameStateManager.setState(GAME_STATES.RESULT, "show_result_panel");
+            this.dollController.onRoundResult?.(!this.lastResult.hitHazard);
             this.uiManager.showResult(this.lastResult);
             this.uiManager.applyRoundResult(this.lastResult);
+            // Result stingers
+            if (this.lastResult.hitHazard) {
+                this.scene.audioManager?.play("sfx_loss", { volume: 0.6 });
+            } else {
+                this.scene.audioManager?.play("sfx_win", { volume: 0.6 });
+                this.scene.spawnWinParticles?.();
+            }
 
             this.emitHostEvent("onDolvinRoundEnd", {
                 betAmount: this.lastResult.betAmount,
                 multiplier: this.lastResult.multiplier,
+                finalMultiplier: this.lastResult.finalMultiplier,
+                travelBonus: this.lastResult.travelBonus,
                 payout: this.lastResult.payout,
+                netChange: this.lastResult.netChange,
+                outcome: this.lastResult.outcome,
                 hitHazard: this.lastResult.hitHazard,
                 maxCombo: this.lastResult.maxCombo,
+                distance: this.lastResult.distance,
+                airTimeMs: this.lastResult.airTimeMs,
+                peakHeight: this.lastResult.peakHeight,
+                speedMode: this.currentSpeedMode,
+                volatility: this.currentVolatility,
                 patternId: this.lastResult.patternId || ""
             });
         }));

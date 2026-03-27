@@ -6,22 +6,31 @@ export default class HudPanel {
         this.comboCount = 0;
         this.comboRatio = 0;
 
-        this.text = scene.add.text(20, 20, "", {
-            fontSize: "28px",
-            color: "#facc15"
-        }).setScrollFactor(0);
+        // Keep HUD below the HTML header ("DOLVIN BASH") to avoid overlap.
+        this.text = scene.add.text(20, 72, "", {
+            fontFamily: '"Bubblegum Sans", cursive',
+            fontSize: "36px",
+            color: "#60a5fa", // Vibrant Blue
+            stroke: "#1e3a8a",
+            strokeThickness: 2,
+            shadow: { offsetX: 3, offsetY: 3, color: "#1e3a8a", blur: 0, stroke: true, fill: true }
+        }).setScrollFactor(0).setDepth(1100);
 
-        this.comboText = scene.add.text(20, 58, "", {
-            fontSize: "22px",
-            color: "#86efac"
-        }).setScrollFactor(0);
+        this.comboText = scene.add.text(20, 118, "", {
+            fontFamily: '"Bubblegum Sans", cursive',
+            fontSize: "26px",
+            color: "#a855f7", // Vibrant Purple
+            stroke: "#581c87",
+            strokeThickness: 2,
+            shadow: { offsetX: 2, offsetY: 2, color: "#3b0764", blur: 0, stroke: true, fill: true }
+        }).setScrollFactor(0).setDepth(1100);
 
-        this.comboBarBg = scene.add.rectangle(20, 95, 140, 10, 0x0f172a)
+        this.comboBarBg = scene.add.rectangle(20, 145, 140, 10, 0x0f172a)
             .setOrigin(0, 0.5)
             .setScrollFactor(0)
             .setStrokeStyle(1, 0x334155);
 
-        this.comboBarFill = scene.add.rectangle(20, 95, 0, 10, 0x22c55e)
+        this.comboBarFill = scene.add.rectangle(20, 145, 0, 10, 0x22c55e)
             .setOrigin(0, 0.5)
             .setScrollFactor(0);
 

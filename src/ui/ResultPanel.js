@@ -3,12 +3,14 @@ export default class ResultPanel {
         this.scene = scene;
 
         this.container = scene.add.container(0, 0).setScrollFactor(0);
+        this.container.setDepth(1200);
 
-        this.bg = scene.add.rectangle(0, 0, 430, 300, 0x0f172a)
+        this.bg = scene.add.rectangle(0, 0, 430, 300, 0x0f172a, 0.96)
             .setStrokeStyle(2, 0x94a3b8)
             .setScrollFactor(0);
 
         this.text = this.scene.add.text(0, -25, "", {
+            fontFamily: '"Bubblegum Sans", cursive',
             fontSize: "24px",
             color: "#ffffff",
             align: "center",
@@ -32,6 +34,7 @@ export default class ResultPanel {
             .setScrollFactor(0);
 
         const txt = this.scene.add.text(0, 0, label, {
+            fontFamily: '"Bubblegum Sans", cursive',
             fontSize: "22px",
             color: "#ffffff"
         }).setOrigin(0.5).setScrollFactor(0);
@@ -44,20 +47,57 @@ export default class ResultPanel {
     layout() {
         const width = this.scene.scale.width;
         const height = this.scene.scale.height;
+        const layout = this.scene.getViewportLayout?.();
 
-        this.container.setPosition(width * 0.5, height * 0.5);
+        const isMobile = width < 900;
+        const hudHeight = layout?.hudReserved ?? (isMobile ? 128 : 126);
+
+        const maxPanelW = isMobile ? Math.min(420, Math.max(284, width - 24)) : 420;
+        const panelW = Math.min(maxPanelW, width - 28);
+        const panelH = isMobile ? 290 : 340; // Increased significantly to avoid overlap
+
+        this.bg.width = panelW;
+        this.bg.height = panelH;
+        this.bg.setStrokeStyle(2, 0x475569);
+
+        this.text.setFontSize(isMobile ? 18 : 20);
+        this.text.setWordWrapWidth(panelW - 36, true);
+        this.text.setPosition(0, isMobile ? -50 : -60); // Moved text UP
+
+        this.btnReplay.list[0].width = isMobile ? 136 : 150;
+        this.btnReplay.list[0].height = isMobile ? 42 : 46;
+        this.btnReplay.list[1].setFontSize(isMobile ? 16 : 18);
+        this.btnReplay.y = (panelH * 0.5) - (isMobile ? 32 : 36); // Pushed button DOWN
+
+        // Keep it above the fixed bottom HUD, centered in the remaining space.
+        const usableHeight = Math.max(120, height - hudHeight);
+        const centerY = layout
+            ? Phaser.Math.Clamp(
+                layout.stageTop + (layout.stageHeight * 0.48),
+                panelH * 0.55,
+                height - hudHeight - (panelH * 0.45)
+            )
+            : (usableHeight * 0.5);
+        this.container.setPosition(width * 0.5, centerY);
     }
 
     show(result) {
-        const resultLabel = result.hitHazard ? "Lost" : "Won";
-        const resultColor = result.hitHazard ? "#fca5a5" : "#86efac";
+        const resultLabel = result.hitHazard ? "Round Lost" : "Round Won";
+        const resultColor = result.hitHazard ? "#f43f5e" : "#4ade80"; // Vibrant Red / Green
+        const pointsLine = result.netChange >= 0
+            ? `Points Won: +${result.netChange}`
+            : `Points Lost: ${result.netChange}`;
 
         this.text.setColor(resultColor);
         this.text.setText(
             `Bet: ${result.betAmount}\n` +
-            `Multiplier: x${result.multiplier}\n` +
+            `Final Multiplier: x${result.finalMultiplier ?? result.multiplier}\n` +
+            `Travel Bonus: +${result.travelBonus ?? 0}\n` +
+            `Distance: ${Math.round(result.distance ?? 0)}\n` +
+            `Air Time: ${Math.max(0, Math.round((result.airTimeMs ?? 0) / 100) / 10)}s\n` +
             `Max Combo: ${result.maxCombo}\n` +
             `Result: ${resultLabel}\n` +
+            `${pointsLine}\n` +
             `Payout: ${result.payout}`
         );
 

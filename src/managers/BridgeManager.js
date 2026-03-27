@@ -25,6 +25,14 @@ export default class BridgeManager {
 
             getCurrentState: () => {
                 return this.gameStateManager.getState();
+            },
+            
+            setBalance: (amount) => {
+                this.roundManager.uiManager.betPanel?.setBalance(amount);
+            },
+            
+            setBet: (amount) => {
+                this.roundManager.uiManager.betPanel?.setBet(amount);
             }
         };
 

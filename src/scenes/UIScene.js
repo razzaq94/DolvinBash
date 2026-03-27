@@ -11,28 +11,43 @@ export default class UIScene extends Phaser.Scene {
         console.log("[UIScene] create");
 
         const { width } = this.scale;
+        const isMobile = width < 900;
 
-        this.stateText = this.add.text(width - 40, 40, "Current State: -", {
-            fontSize: "22px",
-            color: "#ffffff",
-            backgroundColor: "#1e293b",
-            padding: { left: 10, right: 10, top: 6, bottom: 6 }
-        }).setOrigin(1, 0);
+        this.stateText = this.add.text(14, 12, "State: -", {
+            fontSize: isMobile ? "14px" : "16px",
+            color: "#e2e8f0",
+            backgroundColor: "rgba(15, 23, 42, 0.65)",
+            padding: { left: 8, right: 8, top: 6, bottom: 6 }
+        }).setOrigin(0, 0).setAlpha(0.85);
 
-        this.prevStateText = this.add.text(width - 40, 80, "Previous State: -", {
-            fontSize: "18px",
+        this.prevStateText = this.add.text(14, 40, "Prev: -", {
+            fontSize: isMobile ? "12px" : "14px",
             color: "#cbd5e1",
-            backgroundColor: "#0f172a",
-            padding: { left: 10, right: 10, top: 6, bottom: 6 }
-        }).setOrigin(1, 0);
+            backgroundColor: "rgba(2, 6, 23, 0.55)",
+            padding: { left: 8, right: 8, top: 6, bottom: 6 }
+        }).setOrigin(0, 0).setAlpha(0.75);
 
         // listen global state changes
         this.listener = (payload) => {
-            this.stateText.setText(`Current State: ${payload.currentState}`);
-            this.prevStateText.setText(`Previous State: ${payload.previousState || "-"}`);
+            this.stateText.setText(`State: ${payload.currentState}`);
+            this.prevStateText.setText(`Prev: ${payload.previousState || "-"}`);
         };
 
         this.game.events.on("global-state-changed", this.listener);
+
+        this.scale.on("resize", this.handleResize, this);
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+    }
+
+    handleResize(gameSize) {
+        const width = gameSize?.width ?? this.scale.width;
+        const isMobile = width < 900;
+
+        this.stateText.setFontSize(isMobile ? "14px" : "16px");
+        this.prevStateText.setFontSize(isMobile ? "12px" : "14px");
+
+        this.stateText.setPosition(14, 12);
+        this.prevStateText.setPosition(14, 40);
     }
 
     shutdown() {
@@ -40,5 +55,7 @@ export default class UIScene extends Phaser.Scene {
             this.game.events.off("global-state-changed", this.listener);
             this.listener = null;
         }
+
+        this.scale.off("resize", this.handleResize, this);
     }
 }
