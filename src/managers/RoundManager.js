@@ -112,17 +112,26 @@ export default class RoundManager {
             this.dollController.launch();
 
             this.dollController.onMovementComplete = () => {
-                this.finishRound(false);
+                // Round resolves only when the doll fully stops.
+                if (!this.hitHazard) {
+                    // Apply win pose immediately after full stop.
+                    this.dollController.onRoundResult?.(true);
+                    this.dollController.doll?.setAngle?.(0);
+                }
+                this.finishRound(this.hitHazard);
             };
 
             this.interactionSystem.onHazardHit = (item, isFatal) => {
                 this.scene.shakeOnHazard();
                 if (isFatal) {
-                    // Trigger the cinematic hole-fall sequence instead of instant end
-                    this.dollController.onHoleFallComplete = () => {
-                        this.finishRound(true);
-                    };
-                    this.dollController.fallIntoHole(item.x, item.shape);
+                    this.hitHazard = true;
+                    if (item?.variant === "hole") {
+                        // Trigger the cinematic hole-fall sequence
+                        this.dollController.onHoleFallComplete = () => {
+                            this.finishRound(true);
+                        };
+                        this.dollController.fallIntoHole(item.x, item.shape);
+                    }
                 }
                 // No finishRound if not fatal - just let the downward impulse work
             };
@@ -161,9 +170,13 @@ export default class RoundManager {
 
         this.lastResult.patternId = this.interactionSystem.getPatternId();
 
-        this.pushEvent(this.scene.time.delayedCall(500, () => {
+        const resultDelayMs = hitHazard ? 500 : 2000;
+        this.pushEvent(this.scene.time.delayedCall(resultDelayMs, () => {
             this.gameStateManager.setState(GAME_STATES.RESULT, "show_result_panel");
-            this.dollController.onRoundResult?.(!this.lastResult.hitHazard);
+            // Win pose is applied immediately on stop; only enforce loss pose here.
+            if (this.lastResult.hitHazard) {
+                this.dollController.onRoundResult?.(false);
+            }
             this.uiManager.showResult(this.lastResult);
             this.uiManager.applyRoundResult(this.lastResult);
             // Result stingers

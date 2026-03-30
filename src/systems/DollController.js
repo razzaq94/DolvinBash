@@ -42,7 +42,7 @@ export default class DollController {
             dazed: "doll_dazed",
             frustrated: "doll_angry",
             ko: "doll_ko",
-            win: "doll_win", // Restored to standard win
+            win: "doll_happywin",
             loss: "doll_loss",
             dizzy: "doll_dizzy",
             falling: "doll_falling",
@@ -59,6 +59,7 @@ export default class DollController {
         this.slideSound = null;
         this.isFallingInHole = false;
         this.onHoleFallComplete = null;
+        this.groundedMs = 0;
     }
 
     create() {
@@ -123,6 +124,7 @@ export default class DollController {
         this.expressionLockTimerMs = 0;
         this.happySpinRemainingDeg = 0;
         this.onHoleFallComplete = null;
+        this.groundedMs = 0;
 
         this.clearTrails();
         this.setExpression("idle");
@@ -292,6 +294,7 @@ export default class DollController {
 
         const collisionThreshold = this.groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isOnGround = !this.isFallingInHole && this.position.y >= collisionThreshold - 1;
+        this.groundedMs = isOnGround ? (this.groundedMs + (deltaSeconds * 1000)) : 0;
 
         if (isOnGround) {
             // Speed-synced rolling: circumference of visual match travel
@@ -324,7 +327,8 @@ export default class DollController {
             } else {
                 this.velocity.y = 0;
                 const frictionMultiplier = this.speedTuning.frictionMultiplier ?? 1;
-                this.velocity.x *= GAME_CONFIG.doll.friction * frictionMultiplier;
+                const effectiveFriction = Math.max(0.997, (GAME_CONFIG.doll.friction * frictionMultiplier));
+                this.velocity.x *= effectiveFriction;
                 if (!this.isExpressionLocked()) {
                     this.setExpression("dizzy");
                 }
@@ -344,14 +348,15 @@ export default class DollController {
         const isAtRestOnGround = this.position.y >= collisionThreshold - 0.1;
 
         const shouldStopByVelocity =
-            Math.abs(this.velocity.x) <= GAME_CONFIG.doll.stopVelocityX &&
+            Math.abs(this.velocity.x) <= Math.max(3.5, (GAME_CONFIG.doll.stopVelocityX * 0.22)) &&
             Math.abs(this.velocity.y) <= 1 &&
-            isAtRestOnGround;
+            isAtRestOnGround &&
+            this.groundedMs >= 1400;
 
         // Safety timeout should never end mid-air. Round must resolve after ground contact.
         const shouldStopByTime = this.elapsedMs >= GAME_CONFIG.doll.maxFlightTimeMs;
 
-        if (shouldStopByVelocity || (shouldStopByTime && isAtRestOnGround)) {
+        if (shouldStopByVelocity || (shouldStopByTime && isAtRestOnGround && this.groundedMs >= 1400)) {
             this.stopMovement();
         }
 
@@ -459,6 +464,7 @@ export default class DollController {
 
         this.isActive = false;
         this.velocity.set(0, 0);
+        // RoundManager will apply win/loss pose on stop.
         this.setExpression("dizzy");
         this.stopSlideSound(); // FIX: Ensure sound stops when doll stops
         this.syncVisuals();
@@ -811,6 +817,13 @@ export default class DollController {
             this.setExpression("happy");
             this.lockExpressionFor(1000);
             this.happySpinRemainingDeg = 360;
+            return;
+        }
+
+        if (type === "minus") {
+            // Negative multiplier should keep the doll in "fly down" flow.
+            this.setExpression("determined");
+            this.lockExpressionFor(320);
             return;
         }
 

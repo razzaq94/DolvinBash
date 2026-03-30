@@ -39,6 +39,7 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.image("doll_loss", "assets/doll/ko.png");
         this.load.image("doll_falling", "assets/doll/falling.png");
         this.load.image("doll_happy", "assets/doll/happy.png");
+        this.load.image("doll_happywin", "assets/doll/happywin.png");
         this.load.image("doll_angry", "assets/doll/angry.png");
 
         // Custom audio provided by the user

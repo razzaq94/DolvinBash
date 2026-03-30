@@ -370,7 +370,7 @@ export default class InteractionSystem {
         const text = this.scene.add.text(x, y - height, label, {
             fontSize: "18px",
             color: "#ffffff"
-        }).setOrigin(0.5).setVisible(GAME_CONFIG.debug.showSceneLabels);
+        }).setOrigin(0.5).setVisible(false);
 
         // Hazards on grass are behind the doll (depth 36)
         // Holes on road are level with doll shadow or slightly above road
@@ -409,7 +409,7 @@ export default class InteractionSystem {
             stroke: "#000000",
             strokeThickness: 4,
             shadow: { offsetX: 3, offsetY: 3, color: "rgba(0,0,0,0.5)", blur: 2, stroke: true, fill: true }
-        }).setOrigin(0.5).setDepth(20);
+        }).setOrigin(0.5).setDepth(20).setVisible(false);
 
         if (type === "bat") {
             shape.setDepth(35);
@@ -677,7 +677,12 @@ export default class InteractionSystem {
         this.updateComboTimer(deltaSeconds);
 
         const dollCircleRadius = this.getDollCircleRadius();
-        this.checkCircleCollisions(this.pickups, dollX, dollY, dollCircleRadius, (item) => {
+
+        // Resolve circle collisions using swept "best hit" to avoid wrong/missed hits
+        // when multiple nodes are close together.
+        const pickupHit = this.findBestCircleHitSwept(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+        if (pickupHit) {
+            const item = pickupHit;
             const effect = item.effect || { type: "add", value: 1 };
             this.addCombo();
 
@@ -720,7 +725,7 @@ export default class InteractionSystem {
                 this.emitMultiplierChanged();
                 this.dollController.updateScoreValue?.(this.multiplier);
             }
-        });
+        }
 
         // Swept collision for bombs to prevent "miss" at high speed.
         this.checkCircleCollisionsSwept(this.bombs, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
@@ -787,6 +792,20 @@ export default class InteractionSystem {
             this.dollController.onGameplayInteraction?.("hazard");
             this.resetCombo();
 
+            // If the doll is already on the ground and rolling, ANY ground obstacle hit = gameover.
+            const groundY = this.getGroundY();
+            const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+            const isOnGround = dollY >= (collisionThreshold - 1);
+            const isRolling = isOnGround && Math.abs(this.dollController.velocity?.x ?? 0) > 40;
+            const isGroundObstacle = (item.variant === "tree" || item.variant === "lamp_post" || item.variant === "pole" || item.variant === "water" || item.variant === "hole");
+
+            if (isRolling && isGroundObstacle) {
+                this.interactionsEnabled = false;
+                this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
+                this.onHazardHit?.(item, true);
+                return;
+            }
+
             if (item.variant === "hole") {
                 // Ground hole is fatal - instant end
                 this.interactionsEnabled = false;
@@ -814,17 +833,28 @@ export default class InteractionSystem {
         let bestImpulse = null;
         let hasDrop = false;
 
-        this.checkCircleCollisions(this.skyMultipliers, dollX, dollY, dollCircleRadius, (item) => {
+        const skyHit = this.findBestCircleHitSwept(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+        if (skyHit) {
+            const item = skyHit;
+            // CRITICAL: snapshot effect/label/pos BEFORE recycling (recycle mutates text + savedEffect).
+            const hitX = item.x;
+            const hitY = item.y;
+            const skyEffect = this.getSkyMultiplierEffect(item);
+            const rawLabelAtHit = String(item?.text?.text || "").trim();
+            const isMinus = (skyEffect.type === "subtract") || rawLabelAtHit.startsWith("-");
+
+            // Enforce: "-1" always behaves like an obstacle hit (downward), regardless of motion config.
+            const impulse = isMinus
+                ? { ...this.getSkyCollisionImpulse({ ...item, motion: "backward" }), label: "MINUS DROP" }
+                : this.getSkyCollisionImpulse(item);
+
+            // Now consume visuals at the collision location (use snapshot coords)
             this.consumeObject(item);
             this.popObject(item.shape, item.text, item.color ?? 0xfacc15);
-            this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
-            this.spawnImpactParticles("sky", item.x, item.y);
-            this.recycleSkyMultiplier(item, dollX);
-
-            const impulse = this.getSkyCollisionImpulse(item);
+            this.spawnImpactParticles("sky", hitX, hitY);
 
             // Prioritization logic: if we hit a DROP, it MUST win the frame
-            if (impulse.label === "DROP!") {
+            if (impulse.label === "DROP!" || impulse.label === "MINUS DROP") {
                 hasDrop = true;
                 bestImpulse = impulse;
             } else if (!hasDrop) {
@@ -832,41 +862,56 @@ export default class InteractionSystem {
             }
 
             this.scene.shakeMinor?.();
-            const skyEffect = this.getSkyMultiplierEffect(item);
             const prevMultiplier = this.multiplier;
 
             let logLabel = impulse.label;
 
             if (skyEffect.type === "multiply") {
+                this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
                 const multiplyFactor = Math.max(1, Number(skyEffect.value) || 1);
                 this.multiplier = this.clampMultiplier(this.multiplier * multiplyFactor);
-                this.showFloatingText(item.x, item.y - 26, `x${Number(multiplyFactor.toFixed(2))}`, "#60a5fa"); // Blue
+                this.showFloatingText(hitX, hitY - 26, `x${Number(multiplyFactor.toFixed(2))}`, "#60a5fa"); // Blue
                 logLabel = `MULTIPLY x${multiplyFactor}`;
             } else if (skyEffect.type === "add") {
+                this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
                 const addAmount = Number(skyEffect.value) || 0;
                 this.multiplier = this.clampMultiplier(this.multiplier + addAmount);
-                this.showFloatingText(item.x, item.y - 26, `+${Number(addAmount.toFixed(2))}`, "#4ade80"); // Green
+                this.showFloatingText(hitX, hitY - 26, `+${Number(addAmount.toFixed(2))}`, "#4ade80"); // Green
                 logLabel = `ADD +${addAmount}`;
             } else if (skyEffect.type === "subtract") {
                 const subtractAmount = Number(skyEffect.value) || 0;
                 this.multiplier = this.clampMultiplier(this.multiplier - subtractAmount);
-                this.showFloatingText(item.x, item.y - 26, `-${Number(subtractAmount.toFixed(2))}`, "#f43f5e"); // Red
+                this.showFloatingText(hitX, hitY - 26, `-${Number(subtractAmount.toFixed(2))}`, "#f43f5e"); // Red
                 logLabel = `MINUS -${subtractAmount}`;
             }
 
-            this.showFloatingText(item.x, item.y - 56, logLabel, "#fde047"); // Gold
-            this.dollController.onGameplayInteraction?.("sky");
+            this.showFloatingText(hitX, hitY - 56, logLabel, "#fde047"); // Gold
+            if (isMinus) {
+                // Treat -1 like an obstacle hit: hurt sound + impact expression + forced downward impulse.
+                this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
+                this.spawnImpactParticles("hazard", hitX, hitY);
+                this.dollController.onGameplayInteraction?.("hazard");
+            } else {
+                this.dollController.onGameplayInteraction?.("sky");
+            }
 
             if (this.multiplier !== prevMultiplier) {
                 this.emitMultiplierChanged();
                 this.dollController.updateScoreValue?.(this.multiplier);
             }
-        });
+
+            // Only after applying the correct effect/impulse, recycle the node.
+            this.recycleSkyMultiplier(item, dollX);
+        }
 
         if (bestImpulse) {
-            const isDrop = bestImpulse.label === "DROP!";
-            this.dollController.applyImpulse(bestImpulse.x, bestImpulse.y, isDrop);
+            const forceReset = (bestImpulse.label === "DROP!" || bestImpulse.label === "MINUS DROP");
+            this.dollController.applyImpulse(bestImpulse.x, bestImpulse.y, forceReset);
         }
+
+        // Update swept collision baseline
+        this.prevDollX = dollX;
+        this.prevDollY = dollY;
     }
 
     maintainBombStream(dollX = 0) {
@@ -997,9 +1042,10 @@ export default class InteractionSystem {
             minForward = 300;
             xMin = 90;
             xMax = 170;
-            upMin = 180;
-            upMax = 280;
-            label = "PUSH BACK";
+            // Minus hits should drop flight trajectory, not bounce upward.
+            upMin = 220;
+            upMax = 320;
+            label = "MINUS DROP";
         } else if (motion === "force_drop" || motion === "downward") {
             // Aggressive downward plunge for hurdles
             minForward = 100;
@@ -1020,9 +1066,13 @@ export default class InteractionSystem {
         const nextX = Phaser.Math.Clamp(targetX, 420, 560); // Narrower range for "constant" feel
 
         // Simplified: If label is DROP!, nextY is positive (down)
-        const isDownward = (label === "DROP!");
+        const isDownward = (label === "DROP!" || label === "MINUS DROP");
         const nextY = isDownward
-            ? Phaser.Math.Clamp(randomUp, 920, 1400) // Explicit downward plunge
+            ? (
+                label === "MINUS DROP"
+                    ? Phaser.Math.Clamp(randomUp, 320, 720)   // softer downward for -1
+                    : Phaser.Math.Clamp(randomUp, 920, 1400)  // explicit downward plunge
+            )
             : Phaser.Math.Clamp((-randomUp) + (currentVY * 0.03), -700, -150);
 
         return { x: nextX, y: nextY, label };
@@ -1200,7 +1250,7 @@ export default class InteractionSystem {
         item.text.setPosition(item.x, item.y - (visual.height || 0));
         
         item.shape.setVisible(true);
-        item.text.setVisible(GAME_CONFIG.debug.showSceneLabels);
+        item.text.setVisible(false);
         
         const isRoadItem = (variant === "hole" || variant === "water");
         const depth = isRoadItem ? 29 : 25;
@@ -1654,6 +1704,59 @@ export default class InteractionSystem {
         }
     }
 
+    findBestCircleHitSwept(items, prevX, prevY, nextX, nextY, dollRadius) {
+        const ax = prevX;
+        const ay = prevY;
+        const bx = nextX;
+        const by = nextY;
+        const abx = bx - ax;
+        const aby = by - ay;
+        const abLenSq = (abx * abx) + (aby * aby);
+
+        let bestItem = null;
+        let bestDist = Infinity;
+        let bestT = Infinity;
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item?.active) continue;
+
+            const r = (dollRadius + (item.radius ?? 0));
+            const px = item.x;
+            const py = item.y;
+
+            // If doll didn't move, fall back to point distance
+            if (abLenSq <= 0.000001) {
+                const dist = Phaser.Math.Distance.Between(nextX, nextY, px, py);
+                if (dist <= r && dist < bestDist) {
+                    bestDist = dist;
+                    bestT = 0;
+                    bestItem = item;
+                }
+                continue;
+            }
+
+            const apx = px - ax;
+            const apy = py - ay;
+            let t = ((apx * abx) + (apy * aby)) / abLenSq;
+            t = Phaser.Math.Clamp(t, 0, 1);
+            const cx = ax + (abx * t);
+            const cy = ay + (aby * t);
+            const dist = Phaser.Math.Distance.Between(cx, cy, px, py);
+
+            if (dist <= r) {
+                // Prefer closest to path; tie-break by earliest along the segment.
+                if (dist < bestDist - 0.001 || (Math.abs(dist - bestDist) <= 0.001 && t < bestT)) {
+                    bestDist = dist;
+                    bestT = t;
+                    bestItem = item;
+                }
+            }
+        }
+
+        return bestItem;
+    }
+
     isBombSpotClear(x, y, minDist = 120) {
         const minDistSq = minDist * minDist;
         const checkLists = [this.skyMultipliers, this.pickups, this.bombs];
@@ -1739,7 +1842,7 @@ export default class InteractionSystem {
 
             item.glow?.setVisible(isActive && item.type === "bomb"); 
             item.extraGlow?.setVisible(false);
-            item.text.setVisible(isActive && item.type !== "bomb");
+            item.text.setVisible(isActive && item.type !== "bomb" && item.type !== "hazard" && item.type !== "bat");
             item.sprite?.setVisible(isActive && item.type === "bomb");
 
             item.shape.setScale(item.type === "hazard" ? item.shape.scale : 1);
