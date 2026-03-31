@@ -23,10 +23,17 @@ window.addEventListener("load", () => {
     const viewportSize = getViewportSize();
 
     const config = {
-        type: Phaser.CANVAS,
+        type: Phaser.AUTO,
         parent: "game-root",
         width: viewportSize.width,
         height: viewportSize.height,
+        // Force stable rendering across high-DPR devices (S24/4K with zoom/DPR changes).
+        // We intentionally keep internal resolution at 1 and let the browser scale the canvas.
+        resolution: 1,
+        render: {
+            antialias: true,
+            roundPixels: true
+        },
         backgroundColor: GAME_CONFIG.backgroundColor,
         scale: {
             mode: Phaser.Scale.RESIZE,
