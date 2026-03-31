@@ -361,31 +361,19 @@ export default class GameScene extends Phaser.Scene {
     }
 
     layoutWorld() {
-        const { width, height, stageTop, stageBottom, isMobile } = this.getViewportLayout();
-        // Desktop/4K: zoom up so the world doesn't look tiny.
-        // Mobile keeps zoom=1 (portrait framing).
-        const cam = this.cameras.main;
-        const desiredZoom = isMobile
-            ? 1
-            : Phaser.Math.Clamp(
-                Math.min(width / GAME_CONFIG.baseWidth, height / GAME_CONFIG.baseHeight),
-                1,
-                3
-            );
-        cam.setZoom(desiredZoom);
+        const { width, height, stageTop, stageBottom } = this.getViewportLayout();
         const bgTexture = this.textures.get("bg");
         const source = bgTexture?.getSourceImage?.();
         const textureWidth = source?.width || GAME_CONFIG.baseWidth;
         const textureHeight = source?.height || GAME_CONFIG.baseHeight;
-        // Compensate for camera zoom so backgrounds still fill the screen.
-        const scale = (Math.max(width / textureWidth, height / textureHeight) / desiredZoom);
+        const scale = Math.max(width / textureWidth, height / textureHeight);
 
         if (this.skyline1 && this.skyline2) {
             const skyTexture = this.textures.get("bg_skyline");
             const skySource = skyTexture?.getSourceImage?.();
             const skyW = skySource?.width || textureWidth;
             const skyH = skySource?.height || textureHeight;
-            const skyScale = (Math.max(width / skyW, height / skyH) / desiredZoom) * 1.02;
+            const skyScale = Math.max(width / skyW, height / skyH) * 1.02;
             this.skyline1.setScale(skyScale);
             this.skyline2.setScale(skyScale);
 
@@ -399,7 +387,7 @@ export default class GameScene extends Phaser.Scene {
             const bSource = bTexture?.getSourceImage?.();
             const bW = bSource?.width || textureWidth;
             const bH = bSource?.height || textureHeight;
-            const bScale = (Math.max(width / bW, height / bH) / desiredZoom) * 1.02;
+            const bScale = Math.max(width / bW, height / bH) * 1.02;
             this.buildings1.setScale(bScale);
             this.buildings2.setScale(bScale);
 

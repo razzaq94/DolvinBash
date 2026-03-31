@@ -3,30 +3,15 @@ import BootScene from "./scenes/BootScene.js";
 import PreloadScene from "./scenes/PreloadScene.js";
 import GameScene from "./scenes/GameScene.js";
 
-function getViewportSize() {
-    const viewport = window.visualViewport;
-
-    if (viewport) {
-        return {
-            width: Math.round(viewport.width),
-            height: Math.round(viewport.height)
-        };
-    }
-
-    return {
-        width: window.innerWidth,
-        height: window.innerHeight
-    };
-}
-
 window.addEventListener("load", () => {
-    const viewportSize = getViewportSize();
+    const baseWidth = GAME_CONFIG.baseWidth || 1280;
+    const baseHeight = GAME_CONFIG.baseHeight || 720;
 
     const config = {
         type: Phaser.AUTO,
         parent: "game-root",
-        width: viewportSize.width,
-        height: viewportSize.height,
+        width: baseWidth,
+        height: baseHeight,
         // Force stable rendering across high-DPR devices (S24/4K with zoom/DPR changes).
         // We intentionally keep internal resolution at 1 and let the browser scale the canvas.
         resolution: 1,
@@ -36,8 +21,10 @@ window.addEventListener("load", () => {
         },
         backgroundColor: GAME_CONFIG.backgroundColor,
         scale: {
-            mode: Phaser.Scale.RESIZE,
-            autoCenter: Phaser.Scale.CENTER_BOTH
+            mode: Phaser.Scale.FIT,
+            autoCenter: Phaser.Scale.CENTER_BOTH,
+            width: baseWidth,
+            height: baseHeight
         },
         scene: [
             BootScene,
@@ -49,13 +36,11 @@ window.addEventListener("load", () => {
     const game = new Phaser.Game(config);
     window.__DOLVIN_GAME__ = game;
 
-    const resizeGame = () => {
-        if (!game || !game.scale) return;
-        const nextViewportSize = getViewportSize();
-        game.scale.resize(nextViewportSize.width, nextViewportSize.height);
+    const refreshScale = () => {
+        if (!game?.scale) return;
+        game.scale.refresh();
     };
 
-    window.addEventListener("resize", resizeGame);
-    window.visualViewport?.addEventListener("resize", resizeGame);
-    window.visualViewport?.addEventListener("scroll", resizeGame);
+    window.addEventListener("resize", refreshScale);
+    window.visualViewport?.addEventListener("resize", refreshScale);
 });
