@@ -10,6 +10,49 @@
     --text-dim: #94a3b8;
 }
 
+/* Orientation lock: block landscape on mobile/tablet */
+#orientation-lock {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events: auto;
+}
+
+#orientation-lock .orientation-card {
+    width: min(420px, 100%);
+    padding: 22px 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+    text-align: center;
+}
+
+#orientation-lock .orientation-title {
+    font-family: 'Luckiest Guy', cursive;
+    font-size: 26px;
+    color: var(--text-main);
+    margin-bottom: 10px;
+    letter-spacing: 0.06em;
+}
+
+#orientation-lock .orientation-subtitle {
+    font-size: 14px;
+    color: var(--text-dim);
+}
+
+@media (orientation: landscape) and (max-width: 1024px) {
+    #orientation-lock { display: flex; }
+    #ui-root { display: none; }
+    #game-root { visibility: hidden; }
+}
+
 * {
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;
