@@ -4,8 +4,18 @@ import PreloadScene from "./scenes/PreloadScene.js";
 import GameScene from "./scenes/GameScene.js";
 
 window.addEventListener("load", () => {
-    const baseWidth = GAME_CONFIG.baseWidth || 1280;
-    const baseHeight = GAME_CONFIG.baseHeight || 720;
+    // Fixed internal canvas sizes:
+    // - Desktop: 1920x1080 and ENVELOP (fills full screen, crops a little if needed)
+    // - Mobile portrait: 720x1280 and FIT (portrait, fully visible)
+    const viewport = window.visualViewport;
+    const vw = Math.round(viewport?.width ?? window.innerWidth);
+    const vh = Math.round(viewport?.height ?? window.innerHeight);
+    const isPortrait = vh >= vw;
+    const isSmallScreen = Math.min(vw, vh) <= 900;
+
+    const baseWidth = (isPortrait && isSmallScreen) ? 720 : (GAME_CONFIG.baseWidth || 1920);
+    const baseHeight = (isPortrait && isSmallScreen) ? 1280 : (GAME_CONFIG.baseHeight || 1080);
+    const scaleMode = (isPortrait && isSmallScreen) ? Phaser.Scale.FIT : Phaser.Scale.ENVELOP;
 
     const config = {
         type: Phaser.AUTO,
@@ -21,7 +31,7 @@ window.addEventListener("load", () => {
         },
         backgroundColor: GAME_CONFIG.backgroundColor,
         scale: {
-            mode: Phaser.Scale.FIT,
+            mode: scaleMode,
             autoCenter: Phaser.Scale.CENTER_BOTH,
             width: baseWidth,
             height: baseHeight
