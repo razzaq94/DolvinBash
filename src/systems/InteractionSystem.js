@@ -371,7 +371,10 @@ export default class InteractionSystem {
                 visual.y = this.getGroundY() + offset;
             } else {
                 // Side-walk / background strip level
-                visual.y = this.getGroundY() - 34;
+                const layout = this.scene.getViewportLayout?.();
+                // Larger offset on mobile so sidewalk hazards never sit on the road.
+                const sidewalkOffset = layout?.isMobile ? 130 : 34;
+                visual.y = this.getGroundY() - sidewalkOffset;
             }
         } else {
             visual = this.scene.add.rectangle(x, y, width, height, 0xff0000).setStrokeStyle(2, 0x0f172a);
@@ -1250,10 +1253,10 @@ export default class InteractionSystem {
 
     placeHazardProcedural(item, x) {
         // NOTE: Cats removed from the game.
-        // Client feedback: only place ROAD obstacles as colliders.
-        // Side-walk objects (tree/lamp/pole) remain decorative and are ignored for collision.
-        const variants = ["trafficcone", "roadblocker", "hole", "water"];
-        const weights = [44, 26, 15, 15]; // 100 total
+        // Road colliders: trafficcone/roadblocker/hole.
+        // Decorative sidewalk: tree/lamp/pole/water (spawn throughout, but ignored for collision).
+        const variants = ["trafficcone", "roadblocker", "hole", "tree", "lamp_post", "pole", "water"];
+        const weights = [24, 14, 8, 20, 16, 10, 8]; // 100 total
         let roll = Phaser.Math.Between(1, 100);
         let variant = "trafficcone";
         
@@ -1280,7 +1283,9 @@ export default class InteractionSystem {
                 : (yCfg.roadblocker ?? 34);
             item.y = groundY + offset;
         } else {
-            item.y = groundY - 34;
+            const layout = this.scene.getViewportLayout?.();
+            const sidewalkOffset = layout?.isMobile ? 130 : 34;
+            item.y = groundY - sidewalkOffset;
         }
 
         item.hasCollided = false;
@@ -2040,6 +2045,8 @@ export default class InteractionSystem {
 
     relayout() {
         const groundY = this.getGroundY();
+        const layout = this.scene.getViewportLayout?.();
+        const sidewalkOffset = layout?.isMobile ? 130 : 34;
 
         for (let i = 0; i < this.allItems.length; i++) {
             const item = this.allItems[i];
@@ -2048,7 +2055,7 @@ export default class InteractionSystem {
                 if (item.isHole) {
                     item.y = groundY + 4;
                 } else {
-                    item.y = groundY - 34; // Background grass level
+                    item.y = groundY - sidewalkOffset; // Sidewalk/grass level (mobile-safe)
                 }
             } else {
                 item.y = groundY + item.yOffset;

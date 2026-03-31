@@ -315,33 +315,47 @@ export default class GameScene extends Phaser.Scene {
 
         const cam = this.cameras.main;
         const height = this.scale.height;
+        const layout = this.getViewportLayout?.() || { isMobile: false };
 
         // X Following
-        const targetX = this.dollController.position.x + GAME_CONFIG.camera.followOffsetX;
+        const width = this.scale.width;
+        const targetX = layout.isMobile
+            ? (this.dollController.position.x - (width * 0.5)) // center on mobile portrait
+            : (this.dollController.position.x + GAME_CONFIG.camera.followOffsetX);
         const followMaxX = Math.max(0, this.worldWidth - this.scale.width);
         const clampedX = Phaser.Math.Clamp(targetX, 0, followMaxX);
 
-        cam.scrollX = Phaser.Math.Linear(
-            cam.scrollX,
-            clampedX,
-            GAME_CONFIG.camera.followLerp
-        );
+        if (layout.isMobile) {
+            // Hard center on mobile (no lag), like reference portrait games.
+            cam.scrollX = clampedX;
+        } else {
+            cam.scrollX = Phaser.Math.Linear(
+                cam.scrollX,
+                clampedX,
+                GAME_CONFIG.camera.followLerp
+            );
+        }
 
         // Y Following (Sky Follow)
         const dollY = this.dollController.position.y;
         const groundY = this.dollController.groundY;
 
-        const verticalLead = height * 0.48;
+        const verticalLead = layout.isMobile ? (height * 0.5) : (height * 0.48);
         const targetScrollY = Math.min(0, dollY - verticalLead);
 
         const minY = -2000;
         const maxY = 0;
 
-        cam.scrollY = Phaser.Math.Linear(
-            cam.scrollY,
-            Phaser.Math.Clamp(targetScrollY, minY, maxY),
-            GAME_CONFIG.camera.verticalLerp ?? 0.045
-        );
+        const clampedY = Phaser.Math.Clamp(targetScrollY, minY, maxY);
+        if (layout.isMobile) {
+            cam.scrollY = clampedY;
+        } else {
+            cam.scrollY = Phaser.Math.Linear(
+                cam.scrollY,
+                clampedY,
+                GAME_CONFIG.camera.verticalLerp ?? 0.045
+            );
+        }
 
         this.updateBackgroundMotion(cam.scrollX, cam.scrollY);
     }
