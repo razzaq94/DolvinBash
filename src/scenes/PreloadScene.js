@@ -56,6 +56,8 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.image("hazard_pole", "assets/obstacles/water poles.png"); // Using hydrant as pole
         this.load.image("hazard_water_2", "assets/obstacles/water pools 2.png");
         this.load.image("hazard_bomb", "assets/obstacles/bomb.png");
+        this.load.image("hazard_trafficcone", "assets/obstacles/trafficcone.png");
+        this.load.image("hazard_roadblocker", "assets/obstacles/roadblocker.png");
 
         // Placeholder audio from Phaser Labs CDN for remaining effects
         const audioPrefix = "https://labs.phaser.io/assets/audio/SoundEffects/";

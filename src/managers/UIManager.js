@@ -15,6 +15,14 @@ export default class UIManager {
         this.onBetChange = null;
         this.onStart = null;
         this.onReplay = null;
+
+        this.quickBetOverlay = null;
+        this.quickBetPanel = null;
+
+        this.autoPlayCount = 1;
+        this.autoPlayOverlay = null;
+        this.autoPlayRemaining = 0;
+        this.autoPlaySelected = false;
     }
 
     createAll() {
@@ -61,6 +69,7 @@ export default class UIManager {
                     <span id="ui-bet" class="bet-value">10</span>
                 </div>
                 <button id="ui-btn-plus" class="btn-mode btn-icon">+</button>
+                <button id="ui-btn-autoplay" class="btn-mode btn-icon autoplay-btn"></button>
                 <button id="ui-btn-play" class="btn-main">PLAY</button>
             </div>
 
@@ -83,6 +92,22 @@ export default class UIManager {
             this.playUiStart();
             this.onStart?.();
         });
+
+        // Quick select bet
+        document.getElementById("ui-bet")?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.playUiClick();
+            this.toggleQuickBet();
+        });
+
+        document.getElementById("ui-btn-autoplay")?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.playUiClick();
+            this.toggleAutoPlay();
+        });
+
+        // Initial label state
+        this.setAutoPlayRemaining(0);
     }
 
     createResultOverlay() {
@@ -138,6 +163,13 @@ export default class UIManager {
 
     changeBet(delta) {
         this.bet = Phaser.Math.Clamp(this.bet + delta, GAME_CONFIG.round.minBet, GAME_CONFIG.round.maxBet);
+        this.updateBet(this.bet);
+    }
+
+    setBet(value) {
+        const v = Number(value);
+        if (!Number.isFinite(v)) return;
+        this.bet = Phaser.Math.Clamp(v, GAME_CONFIG.round.minBet, GAME_CONFIG.round.maxBet);
         this.updateBet(this.bet);
     }
 
@@ -198,7 +230,224 @@ export default class UIManager {
         this.scene.audioManager?.play("sfx_start", { volume: 0.5 });
     }
 
+    toggleQuickBet() {
+        if (this.quickBetOverlay) {
+            this.closeQuickBet();
+            return;
+        }
+        this.openQuickBet();
+    }
+
+    openQuickBet() {
+        if (!this.root || this.quickBetOverlay) return;
+
+        const overlay = document.createElement("div");
+        overlay.className = "quickbet-overlay";
+        overlay.addEventListener("click", () => this.closeQuickBet());
+
+        const panel = document.createElement("div");
+        panel.className = "quickbet-panel glass-panel";
+        panel.addEventListener("click", (e) => e.stopPropagation());
+
+        const title = document.createElement("div");
+        title.className = "quickbet-title";
+        title.textContent = "Quick Bet";
+
+        const grid = document.createElement("div");
+        grid.className = "quickbet-grid";
+
+        const values = [1, 2, 5, 10, 20, 30, 40, 50, 80, 100, 120, 150, 200];
+        values.forEach((val) => {
+            const btn = document.createElement("button");
+            btn.className = "quickbet-btn btn-mode";
+            btn.textContent = String(val);
+            btn.addEventListener("click", () => {
+                this.playUiClick();
+                this.setBet(val);
+                this.closeQuickBet();
+            });
+            grid.appendChild(btn);
+        });
+
+        panel.appendChild(title);
+        panel.appendChild(grid);
+        overlay.appendChild(panel);
+        this.root.appendChild(overlay);
+
+        this.quickBetOverlay = overlay;
+        this.quickBetPanel = panel;
+    }
+
+    closeQuickBet() {
+        if (this.quickBetOverlay) {
+            this.quickBetOverlay.remove();
+        }
+        this.quickBetOverlay = null;
+        this.quickBetPanel = null;
+    }
+
+    toggleAutoPlay() {
+        if (this.autoPlayOverlay) {
+            this.closeAutoPlay();
+            return;
+        }
+        this.openAutoPlay();
+    }
+
+    openAutoPlay() {
+        if (!this.root || this.autoPlayOverlay) return;
+
+        const overlay = document.createElement("div");
+        overlay.className = "quickbet-overlay";
+        overlay.addEventListener("click", () => this.closeAutoPlay());
+
+        const panel = document.createElement("div");
+        panel.className = "autoplay-panel glass-panel";
+        panel.addEventListener("click", (e) => e.stopPropagation());
+
+        const header = document.createElement("div");
+        header.className = "autoplay-header";
+
+        const title = document.createElement("div");
+        title.className = "autoplay-title";
+        title.textContent = "Autoplay settings";
+
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "autoplay-close";
+        closeBtn.type = "button";
+        closeBtn.textContent = "×";
+        closeBtn.addEventListener("click", () => {
+            this.playUiClick();
+            this.closeAutoPlay();
+        });
+
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+
+        const grid = document.createElement("div");
+        grid.className = "autoplay-grid";
+
+        const values = [1, 10, 20, 50, 100, 250, 500, 750, 1000];
+        values.forEach((val) => {
+            const btn = document.createElement("button");
+            btn.className = "autoplay-chip";
+            btn.type = "button";
+            btn.textContent = String(val);
+            btn.addEventListener("click", () => {
+                this.playUiClick();
+                this.autoPlayCount = val;
+                this.autoPlaySelected = true;
+                this.setAutoPlayRemaining(0);
+            });
+            grid.appendChild(btn);
+        });
+
+        const sliderRow = document.createElement("div");
+        sliderRow.className = "autoplay-slider-row";
+
+        const sliderLabel = document.createElement("div");
+        sliderLabel.className = "autoplay-subtitle";
+        sliderLabel.textContent = "Numbers of autospins:";
+
+        const slider = document.createElement("input");
+        slider.className = "autoplay-slider";
+        slider.type = "range";
+        slider.min = "1";
+        slider.max = "1000";
+        slider.step = "1";
+        slider.value = String(this.autoPlayCount || 1);
+
+        const sliderValue = document.createElement("div");
+        sliderValue.className = "autoplay-value";
+        sliderValue.textContent = String(this.autoPlayCount || 1);
+
+        const syncValue = (next) => {
+            const v = Math.max(1, Math.min(1000, Number(next) || 1));
+            this.autoPlayCount = v;
+            this.autoPlaySelected = true;
+            slider.value = String(v);
+            sliderValue.textContent = String(v);
+            this.setAutoPlayRemaining(0);
+        };
+
+        slider.addEventListener("input", () => {
+            this.playUiClick();
+            syncValue(slider.value);
+        });
+
+        // Ensure chips update slider/value too
+        grid.querySelectorAll("button.autoplay-chip").forEach((btn) => {
+            btn.addEventListener("click", () => syncValue(btn.textContent));
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "autoplay-actions";
+
+        const startBtn = document.createElement("button");
+        startBtn.className = "btn-main autoplay-start";
+        startBtn.type = "button";
+        startBtn.textContent = `Start autoplay (${this.autoPlayCount || 1})`;
+        const updateStartLabel = () => {
+            startBtn.textContent = `Start autoplay (${this.autoPlayCount || 1})`;
+        };
+        slider.addEventListener("input", updateStartLabel);
+        grid.querySelectorAll("button.autoplay-chip").forEach((btn) => btn.addEventListener("click", updateStartLabel));
+
+        startBtn.addEventListener("click", () => {
+            this.playUiStart();
+            this.closeAutoPlay();
+            this.onStart?.();
+        });
+
+        actions.appendChild(startBtn);
+
+        sliderRow.appendChild(slider);
+        sliderRow.appendChild(sliderValue);
+
+        panel.appendChild(header);
+        panel.appendChild(sliderLabel);
+        panel.appendChild(grid);
+        panel.appendChild(sliderRow);
+        panel.appendChild(actions);
+        overlay.appendChild(panel);
+        this.root.appendChild(overlay);
+
+        this.autoPlayOverlay = overlay;
+    }
+
+    closeAutoPlay() {
+        if (this.autoPlayOverlay) {
+            this.autoPlayOverlay.remove();
+        }
+        this.autoPlayOverlay = null;
+    }
+
+    setAutoPlayRemaining(remaining) {
+        const r = Math.max(0, Number(remaining) || 0);
+        this.autoPlayRemaining = r;
+        const el = document.getElementById("ui-btn-autoplay");
+        if (!el) return;
+
+        // Reference style: show ONLY number when active/selected; icon is always present.
+        if (r > 0) {
+            el.textContent = String(r);
+            return;
+        }
+
+        // When not running: show selected count ONLY if user selected something.
+        el.textContent = this.autoPlaySelected ? String(this.autoPlayCount) : "";
+    }
+
+    clearAutoPlaySelection() {
+        this.autoPlaySelected = false;
+        this.autoPlayRemaining = 0;
+        const el = document.getElementById("ui-btn-autoplay");
+        if (el) el.textContent = "";
+    }
+
     getCurrentBet() { return this.bet; }
+    getAutoPlayCount() { return this.autoPlayCount; }
+    getAutoPlaySelected() { return !!this.autoPlaySelected; }
     getSpeedMode() { return "NORMAL"; }
     getVolatility() { return "NORMAL"; }
     updateCombo(payload) { this.hudPanel?.setCombo(payload?.comboCount, payload?.comboWindowRatio); }

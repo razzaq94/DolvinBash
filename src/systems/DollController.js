@@ -24,6 +24,9 @@ export default class DollController {
 
         this.trailTimer = 0;
         this.trails = [];
+        this.trailTheme = "default";
+        this.trailThemeRemainingMs = 0;
+        this.trailsEnabled = true;
         this.currentExpression = "idle";
         this.lastVerticalState = "neutral";
         this.expressionLockTimerMs = 0;
@@ -86,6 +89,9 @@ export default class DollController {
         this.hasLaunched = false;
         this.elapsedMs = 0;
         this.trailTimer = 0;
+        this.trailTheme = "default";
+        this.trailThemeRemainingMs = 0;
+        this.trailsEnabled = true;
         this.launchStartX = startX;
         this.maxX = startX;
         this.minY = startY;
@@ -116,6 +122,9 @@ export default class DollController {
         this.hasLaunched = false;
         this.startIdleFloating();
         this.trailTimer = 0;
+        this.trailTheme = "default";
+        this.trailThemeRemainingMs = 0;
+        this.trailsEnabled = true;
         this.launchStartX = startX;
         this.maxX = startX;
         this.minY = startY;
@@ -127,6 +136,7 @@ export default class DollController {
         this.groundedMs = 0;
 
         this.clearTrails();
+        this.trailsEnabled = true;
         this.setExpression("idle");
         this.stopSlideSound();
 
@@ -275,6 +285,9 @@ export default class DollController {
         this.elapsedMs += deltaSeconds * 1000;
         this.trailTimer += deltaSeconds;
         this.expressionLockTimerMs = Math.max(0, this.expressionLockTimerMs - (deltaSeconds * 1000));
+        if (this.trailThemeRemainingMs > 0) {
+            this.trailThemeRemainingMs = Math.max(0, this.trailThemeRemainingMs - (deltaSeconds * 1000));
+        }
 
         const gravityMultiplier = this.speedTuning.gravityMultiplier ?? 1;
         if (this.airBoostTimerMs > 0) {
@@ -396,6 +409,11 @@ export default class DollController {
         this.isActive = true; // Ensure we keep updating to finish the fall
         this.setExpression("panic");
 
+        // Turn off trails completely during hole fall.
+        this.trailsEnabled = false;
+        this.trailTimer = 0;
+        this.clearTrails();
+
         // Make the hole render in front so the doll looks like it falls "into" it.
         // (Doll is depth ~36; scoreContainer ~45.)
         this.holeVisual = holeVisual || null;
@@ -474,6 +492,28 @@ export default class DollController {
         }
     }
 
+    stopImmediatelyDead() {
+        // Instant stop on fatal ground obstacle hit while rolling.
+        this.isActive = false;
+        this.velocity.set(0, 0);
+        this.trailTimer = 0;
+        this.trailsEnabled = false;
+        this.clearTrails();
+        this.setExpression("ko");
+        this.stopSlideSound();
+        this.syncVisuals();
+
+        if (typeof this.onMovementComplete === "function") {
+            this.onMovementComplete();
+        }
+    }
+
+    disableTrailsNow() {
+        this.trailsEnabled = false;
+        this.trailTimer = 0;
+        this.clearTrails();
+    }
+
     updateFlightExpression() {
         if (!this.hasLaunched) return;
         if (this.isExpressionLocked()) return;
@@ -537,6 +577,7 @@ export default class DollController {
 
     spawnTrail() {
         if (!this.isActive || !this.doll || !this.scene.add) return;
+        if (!this.trailsEnabled) return;
 
         const x = this.position.x;
         const y = this.position.y;
@@ -545,13 +586,12 @@ export default class DollController {
         // Only spawn trail if moving fast enough
         if (speedX < 80) return;
 
-        const trailColor = 0x22ff22; // Vibrant Neon Green
-        const coreColor = 0xbbf7d0;  // Light Green/White Core
+        const { trailColor, coreColor } = this.getTrailColors();
         
         // 1. Thick Glowing Beam Segment
         // Base wide glow
-        const glowRadius = (this.doll.displayHeight * 0.5) * 1.05;
-        const beamGlow = this.scene.add.circle(x, y, glowRadius, trailColor, 0.36)
+        const glowRadius = (this.doll.displayHeight * 0.5) * 0.68;
+        const beamGlow = this.scene.add.circle(x, y, glowRadius, trailColor, 0.72)
             .setDepth(this.doll.depth - 2);
         
         this.scene.tweens.add({
@@ -566,8 +606,8 @@ export default class DollController {
         });
 
         // 2. Inner Hot Core
-        const coreRadius = glowRadius * 0.65;
-        const beamCore = this.scene.add.circle(x, y, coreRadius, coreColor, 0.45)
+        const coreRadius = glowRadius * 0.46;
+        const beamCore = this.scene.add.circle(x, y, coreRadius, coreColor, 0.82)
             .setDepth(this.doll.depth - 1);
         
         this.scene.tweens.add({
@@ -619,6 +659,36 @@ export default class DollController {
                 onComplete: () => streak.destroy()
             });
         }
+    }
+
+    setTrailTheme(theme = "default", durationMs = 900) {
+        const t = String(theme || "default");
+        this.trailTheme = t;
+        // durationMs <= 0 means "persist until changed"
+        const dur = Number(durationMs);
+        this.trailThemeRemainingMs = Number.isFinite(dur) ? dur : 0;
+    }
+
+    getTrailColors() {
+        // Defaults (green)
+        let trailColor = 0x22c55e;
+        let coreColor = 0x86efac;
+
+        const isThemeActive = (this.trailThemeRemainingMs <= 0) || (this.trailThemeRemainingMs > 0);
+        if (isThemeActive) {
+            if (this.trailTheme === "plus") {
+                trailColor = 0x22c55e;
+                coreColor = 0x86efac;
+            } else if (this.trailTheme === "x") {
+                trailColor = 0xfacc15;
+                coreColor = 0xfef08a;
+            } else if (this.trailTheme === "minus") {
+                trailColor = 0xdc2626;
+                coreColor = 0xfca5a5;
+            }
+        }
+
+        return { trailColor, coreColor };
     }
 
     playBounceFeedback() {

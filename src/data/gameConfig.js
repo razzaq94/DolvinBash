@@ -7,7 +7,7 @@ export const GAME_CONFIG = {
     round: {
         startingBalance: 1000,
         defaultBet: 50,
-        minBet: 10,
+        minBet: 1,
         maxBet: 500,
         baseMultiplier: 1,
         travelBonusPer100: 0.02,
@@ -19,6 +19,13 @@ export const GAME_CONFIG = {
         groundOffsetFromBottom: 118, // Lowered from 140 to sink deeper
         groundHeight: 140,
         width: 20000
+    },
+
+    // Fine-tune road obstacle vertical placement (relative to groundY).
+    roadObstacleY: {
+        hole: 34,
+        trafficcone: 34,
+        roadblocker: 74
     },
 
     doll: {

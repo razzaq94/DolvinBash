@@ -138,22 +138,32 @@ export default class GameScene extends Phaser.Scene {
                 this.kickerController.isAnimating = true;
 
                 this.setKickerPose("kicker_ready");
+                // Smoother feel: subtle anticipation dip
+                this.tweens.killTweensOf(this.kicker);
+                this.tweens.add({
+                    targets: this.kicker,
+                    y: this.getGroundY() + 14,
+                    duration: 70,
+                    yoyo: true,
+                    ease: "Sine.easeInOut"
+                });
 
-                this.time.delayedCall(90, () => {
+                this.time.delayedCall(70, () => {
                     this.setKickerPose("kicker_swing1");
                     // Sound: Bash/Kick
                     this.audioManager?.play("sfx_kick", { volume: 0.35 });
                 });
 
-                this.time.delayedCall(170, () => {
+                this.time.delayedCall(135, () => {
                     this.setKickerPose("kicker_swing2");
                 });
 
-                this.time.delayedCall(280, () => {
+                // Keep follow frame very brief so the "hand out" pose doesn't linger
+                this.time.delayedCall(200, () => {
                     this.setKickerPose("kicker_follow");
                 });
 
-                this.time.delayedCall(460, () => {
+                this.time.delayedCall(300, () => {
                     this.setKickerPose("kicker_idle");
                     this.kickerController.isAnimating = false;
                     this.startKickerIdle();

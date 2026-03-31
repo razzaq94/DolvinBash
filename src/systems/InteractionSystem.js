@@ -347,6 +347,8 @@ export default class InteractionSystem {
         }
 
         const isHole = variant === "hole";
+        // Client requirement: only cone/roadblocker sit on road center.
+        const isRoadObstacle = (variant === "trafficcone" || variant === "roadblocker" || variant === "hole");
         const isBackgroundObject = type === "hazard" && !isHole;
 
         if (finalTexture && this.scene.textures.exists(finalTexture)) {
@@ -357,11 +359,19 @@ export default class InteractionSystem {
             visual.setScale(Math.min(scaleX, scaleY));
             
             visual.setOrigin(0.5, 1);
-            if (isHole) {
-                visual.y = this.getGroundY() + 10; // Pushed down to "mid" of road
+            if (isRoadObstacle) {
+                // Road-aligned obstacles
+                // Push a bit lower so it sits centered on the road strip
+                const yCfg = GAME_CONFIG.roadObstacleY || {};
+                const offset =
+                    variant === "hole" ? (yCfg.hole ?? 10)
+                    : variant === "trafficcone" ? (yCfg.trafficcone ?? 34)
+                    : variant === "roadblocker" ? (yCfg.roadblocker ?? 34)
+                    : 34;
+                visual.y = this.getGroundY() + offset;
             } else {
-                // Background grass strip level
-                visual.y = this.getGroundY() - 34; 
+                // Side-walk / background strip level
+                visual.y = this.getGroundY() - 34;
             }
         } else {
             visual = this.scene.add.rectangle(x, y, width, height, 0xff0000).setStrokeStyle(2, 0x0f172a);
@@ -372,9 +382,8 @@ export default class InteractionSystem {
             color: "#ffffff"
         }).setOrigin(0.5).setVisible(false);
 
-        // Hazards on grass are behind the doll (depth 36)
-        // Holes on road are level with doll shadow or slightly above road
-        const depth = isHole ? 29 : 25;
+        // Sidewalk objects behind doll; road center obstacles level with road.
+        const depth = isRoadObstacle ? 29 : 25;
         visual.setDepth(depth);
         text.setDepth(depth + 1);
 
@@ -396,6 +405,7 @@ export default class InteractionSystem {
             text,
             isGroundObject,
             isHole,
+            isRoadObstacle,
             active: true
         };
     }
@@ -442,6 +452,10 @@ export default class InteractionSystem {
                 return { width: 60, height: 180, texture: "hazard_lamp_post", label: "LAMP" };
             case "pole":
                 return { width: 40, height: 80, texture: "hazard_pole", label: "POLE" };
+            case "trafficcone":
+                return { width: 96, height: 150, texture: "hazard_trafficcone", label: "CONE" };
+            case "roadblocker":
+                return { width: 280, height: 165, texture: "hazard_roadblocker", label: "BLOCK" };
             case "hole":
                 return { width: 140, height: 40, texture: "hazard_hole", label: "HOLE" };
             case "water":
@@ -684,6 +698,19 @@ export default class InteractionSystem {
         if (pickupHit) {
             const item = pickupHit;
             const effect = item.effect || { type: "add", value: 1 };
+            // Trail color theme (reference): + green, x yellow, - red
+            const trailTheme =
+                effect.type === "multiply" ? "x"
+                : effect.type === "subtract" ? "minus"
+                : "plus";
+            this.dollController.setTrailTheme?.(trailTheme, 0);
+
+            // Same-color hit effect at collision point
+            const pickupFxType =
+                effect.type === "multiply" ? "sky_x"
+                : effect.type === "subtract" ? "sky_minus"
+                : "sky_plus";
+            this.spawnImpactParticles(pickupFxType, item.x, item.y);
             this.addCombo();
 
             let comboBonus = 0;
@@ -706,6 +733,7 @@ export default class InteractionSystem {
             this.consumeObject(item);
             this.popObject(item.shape, item.text, 0x22c55e);
             this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
+            // Keep small generic sparkle too (optional)
             this.spawnImpactParticles("pickup", item.x, item.y);
             this.applyRandomCollisionImpulse("pickup");
 
@@ -753,6 +781,7 @@ export default class InteractionSystem {
             this.spawnImpactParticles("bomb", dollX, dollY);
             this.applyRandomCollisionImpulse("hazard");
             this.dollController.onGameplayInteraction?.("bomb");
+            this.dollController.setTrailTheme?.("minus", 0);
 
             if (this.multiplier !== prevMultiplier) {
                 this.emitMultiplierChanged();
@@ -780,37 +809,48 @@ export default class InteractionSystem {
             const dir = (this.dollController.velocity.x ?? 1) >= 0 ? 1 : -1;
             this.dollController.forceDiveDown?.(dir);
             this.dollController.onGameplayInteraction?.("bat");
+            this.dollController.setTrailTheme?.("minus", 0);
 
             this.consumeObject(item);
         });
         
         this.checkRectCollisions(this.hazards, dollX, dollY, dollW, dollH, (item) => {
             if (item.hasCollided) return;
-            item.hasCollided = true; // FIX: Mark as collided so we don't hit it again
-            
-            this.spawnImpactParticles("hazard", item.x, item.y);
-            this.dollController.onGameplayInteraction?.("hazard");
-            this.resetCombo();
+            // Colliders: hole + road obstacles only. Side-walk decoration is ignored.
+            const isRoadCollider = (item.variant === "hole" || item.variant === "trafficcone" || item.variant === "roadblocker");
+            if (!isRoadCollider) return;
 
-            // If the doll is already on the ground and rolling, ANY ground obstacle hit = gameover.
             const groundY = this.getGroundY();
             const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
             const isOnGround = dollY >= (collisionThreshold - 1);
-            const isRolling = isOnGround && Math.abs(this.dollController.velocity?.x ?? 0) > 40;
-            const isGroundObstacle = (item.variant === "tree" || item.variant === "lamp_post" || item.variant === "pole" || item.variant === "water" || item.variant === "hole");
 
-            if (isRolling && isGroundObstacle) {
-                this.interactionsEnabled = false;
-                this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
-                this.onHazardHit?.(item, true);
-                return;
-            }
+            item.hasCollided = true; // Mark as collided so we don't hit it again
+            
+            this.spawnImpactParticles("hazard", item.x, item.y);
+            this.dollController.onGameplayInteraction?.("hazard");
+            this.dollController.setTrailTheme?.("minus", 0);
+            this.resetCombo();
 
             if (item.variant === "hole") {
                 // Ground hole is fatal - instant end
+                this.dollController.disableTrailsNow?.();
                 this.interactionsEnabled = false;
                 this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
                 this.onHazardHit?.(item, true); // true = fatal
+                return;
+            }
+
+            if (item.variant === "trafficcone" || item.variant === "roadblocker") {
+                // Major road obstacles should only kill when the doll is on the ground.
+                if (!isOnGround) {
+                    // In-air touch looks odd; ignore and let doll land naturally.
+                    return;
+                }
+                this.interactionsEnabled = false;
+                this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
+                this.onHazardHit?.(item, true);
+                // Stop AFTER marking hazard so RoundManager doesn't apply happywin.
+                this.dollController.stopImmediatelyDead?.();
                 return;
             }
 
@@ -843,6 +883,11 @@ export default class InteractionSystem {
             const rawLabelAtHit = String(item?.text?.text || "").trim();
             const isMinus = (skyEffect.type === "subtract") || rawLabelAtHit.startsWith("-");
 
+            const hitParticleType =
+                skyEffect.type === "multiply" ? "sky_x"
+                : skyEffect.type === "add" ? "sky_plus"
+                : "sky_minus";
+
             // Enforce: "-1" always behaves like an obstacle hit (downward), regardless of motion config.
             const impulse = isMinus
                 ? { ...this.getSkyCollisionImpulse({ ...item, motion: "backward" }), label: "MINUS DROP" }
@@ -851,7 +896,7 @@ export default class InteractionSystem {
             // Now consume visuals at the collision location (use snapshot coords)
             this.consumeObject(item);
             this.popObject(item.shape, item.text, item.color ?? 0xfacc15);
-            this.spawnImpactParticles("sky", hitX, hitY);
+            this.spawnImpactParticles(hitParticleType, hitX, hitY);
 
             // Prioritization logic: if we hit a DROP, it MUST win the frame
             if (impulse.label === "DROP!" || impulse.label === "MINUS DROP") {
@@ -889,10 +934,11 @@ export default class InteractionSystem {
             if (isMinus) {
                 // Treat -1 like an obstacle hit: hurt sound + impact expression + forced downward impulse.
                 this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
-                this.spawnImpactParticles("hazard", hitX, hitY);
                 this.dollController.onGameplayInteraction?.("hazard");
+                this.dollController.setTrailTheme?.("minus", 0);
             } else {
                 this.dollController.onGameplayInteraction?.("sky");
+                this.dollController.setTrailTheme?.(skyEffect.type === "multiply" ? "x" : "plus", 0);
             }
 
             if (this.multiplier !== prevMultiplier) {
@@ -1204,11 +1250,12 @@ export default class InteractionSystem {
 
     placeHazardProcedural(item, x) {
         // NOTE: Cats removed from the game.
-        const variants = ["tree", "lamp_post", "pole", "hole", "water"];
-        // Weighted random: more common trees/lamps, rarer holes/water
-        const weights = [35, 28, 17, 10, 10]; // 100 total
+        // Client feedback: only place ROAD obstacles as colliders.
+        // Side-walk objects (tree/lamp/pole) remain decorative and are ignored for collision.
+        const variants = ["trafficcone", "roadblocker", "hole", "water"];
+        const weights = [44, 26, 15, 15]; // 100 total
         let roll = Phaser.Math.Between(1, 100);
-        let variant = "tree";
+        let variant = "trafficcone";
         
         for (let i = 0; i < variants.length; i++) {
             roll -= weights[i];
@@ -1225,12 +1272,15 @@ export default class InteractionSystem {
         item.isHole = (variant === "hole");
         item.x = x;
         
-        if (variant === "hole") {
-            item.y = groundY + 22; // Deeper in the road
-        } else if (variant === "water") {
-            item.y = groundY - 24;
+        if (variant === "hole" || variant === "trafficcone" || variant === "roadblocker") {
+            const yCfg = GAME_CONFIG.roadObstacleY || {};
+            const offset =
+                variant === "hole" ? (yCfg.hole ?? 10)
+                : variant === "trafficcone" ? (yCfg.trafficcone ?? 34)
+                : (yCfg.roadblocker ?? 34);
+            item.y = groundY + offset;
         } else {
-            item.y = groundY - 34; // Grass
+            item.y = groundY - 34;
         }
 
         item.hasCollided = false;
@@ -1252,7 +1302,7 @@ export default class InteractionSystem {
         item.shape.setVisible(true);
         item.text.setVisible(false);
         
-        const isRoadItem = (variant === "hole" || variant === "water");
+        const isRoadItem = (variant === "hole" || variant === "trafficcone" || variant === "roadblocker");
         const depth = isRoadItem ? 29 : 25;
         item.shape.setDepth(depth);
         item.text.setDepth(depth + 1);
@@ -1548,6 +1598,69 @@ export default class InteractionSystem {
                 onComplete: () => burst.destroy()
             });
         }
+
+        // Colored glow on multiplier hit (reference-like round burst + sparkles)
+        if (type === "sky_plus" || type === "sky_x" || type === "sky_minus") {
+            const color =
+                type === "sky_plus" ? 0x22c55e :   // green
+                type === "sky_x" ? 0xfacc15 :      // yellow (more solid)
+                0xdc2626;                          // red (more solid)
+
+            // Make it clearly visible at the exact collision point
+            const ring = this.scene.add.circle(x, y, 14, color, 0.78).setDepth(900);
+            const ring2 = this.scene.add.circle(x, y, 11, color, 0.52).setDepth(899);
+            const core = this.scene.add.circle(x, y, 8, color, 0.98).setDepth(901);
+
+            this.scene.tweens.add({
+                targets: [ring, ring2],
+                radius: 72,
+                alpha: 0,
+                duration: 680,
+                ease: "Quad.easeOut",
+                onComplete: () => {
+                    ring.destroy();
+                    ring2.destroy();
+                }
+            });
+            this.scene.tweens.add({
+                targets: core,
+                radius: 30,
+                alpha: 0,
+                duration: 640,
+                ease: "Quad.easeOut",
+                onComplete: () => core.destroy()
+            });
+
+            // Sparkle burst (like reference stars)
+            const sparkleColor =
+                type === "sky_plus" ? "#4ade80" :
+                type === "sky_x" ? "#fde047" :
+                "#fb7185";
+
+            for (let i = 0; i < 10; i++) {
+                const star = this.scene.add.text(x, y, "✦", {
+                    fontSize: `${Phaser.Math.Between(16, 26)}px`,
+                    color: sparkleColor
+                }).setOrigin(0.5).setDepth(902);
+
+                const targetX = x + Phaser.Math.Between(-110, 110);
+                const targetY = y + Phaser.Math.Between(-90, 90);
+                const spin = Phaser.Math.Between(-180, 180);
+
+                this.scene.tweens.add({
+                    targets: star,
+                    x: targetX,
+                    y: targetY,
+                    angle: spin,
+                    alpha: 0,
+                    scale: 0.6,
+                    duration: Phaser.Math.Between(700, 980),
+                    ease: "Quad.easeOut",
+                    onComplete: () => star.destroy()
+                });
+            }
+            return;
+        }
     }
 
     updateComboTimer(deltaSeconds) {
@@ -1789,9 +1902,10 @@ export default class InteractionSystem {
             const isTall = (item.variant === "tree" || item.variant === "lamp_post" || item.variant === "pole");
             const isHole = (item.variant === "hole");
             const isWater = (item.variant === "water");
+            const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
             
-            const wFactor = isHole ? 0.42 : (isTall ? 0.36 : (isWater ? 0.70 : 0.62));
-            const hFactor = isHole ? 0.42 : (isTall ? 0.92 : (isWater ? 0.52 : 0.66));
+            const wFactor = isHole ? 0.42 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.55 : 0.62)));
+            const hFactor = isHole ? 0.42 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.55 : 0.66)));
 
             const itemHalfW = (item.width * wFactor) * 0.5;
             const itemHalfH = (item.height * hFactor) * 0.5;

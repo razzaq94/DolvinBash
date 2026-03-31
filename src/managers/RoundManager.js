@@ -19,9 +19,11 @@ export default class RoundManager {
         this.currentPattern = null;
         this.currentSpeedMode = GAME_CONFIG.round.defaultSpeedMode || "NORMAL";
         this.currentVolatility = GAME_CONFIG.round.defaultVolatility || "NORMAL";
+
+        this.autoPlayRemaining = 0;
     }
 
-    startPrototypeRound() {
+    startPrototypeRound({ fromAutoplay = false } = {}) {
         if (!this.gameStateManager.isState(GAME_STATES.BETTING)) {
             console.warn("[RoundManager] Cannot start round. Current state is not BETTING.");
             return;
@@ -34,6 +36,13 @@ export default class RoundManager {
         this.currentBet = this.uiManager.getCurrentBet();
         this.currentSpeedMode = this.uiManager.getSpeedMode();
         this.currentVolatility = this.uiManager.getVolatility();
+        if (!fromAutoplay) {
+            const desired = Math.max(1, Number(this.uiManager.getAutoPlayCount?.() ?? 1) || 1);
+            // Show/run autoplay ONLY when user explicitly selected it (even if it's x1).
+            const selected = !!this.uiManager.getAutoPlaySelected?.();
+            this.autoPlayRemaining = selected ? desired : 0;
+            this.uiManager.setAutoPlayRemaining?.(this.autoPlayRemaining);
+        }
         this.dollController.setRoundTuning?.(this.currentSpeedMode);
         this.interactionSystem.setRoundTuning?.({
             speedMode: this.currentSpeedMode,
@@ -204,6 +213,24 @@ export default class RoundManager {
                 volatility: this.currentVolatility,
                 patternId: this.lastResult.patternId || ""
             });
+
+            // Auto play: replay and start next round automatically.
+            const prevRemaining = this.autoPlayRemaining;
+            if (this.autoPlayRemaining > 0) {
+                this.autoPlayRemaining -= 1;
+            }
+            this.uiManager.setAutoPlayRemaining?.(this.autoPlayRemaining);
+            if (prevRemaining > 0 && this.autoPlayRemaining === 0) {
+                // Autoplay finished -> show icon only (no number)
+                this.uiManager.clearAutoPlaySelection?.();
+            }
+
+            if (this.autoPlayRemaining > 0) {
+                this.pushEvent(this.scene.time.delayedCall(650, () => {
+                    this.replay();
+                    this.startPrototypeRound({ fromAutoplay: true });
+                }));
+            }
         }));
     }
 
