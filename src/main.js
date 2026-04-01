@@ -4,17 +4,24 @@ import PreloadScene from "./scenes/PreloadScene.js";
 import GameScene from "./scenes/GameScene.js";
 
 window.addEventListener("load", () => {
-    // Canvas + game size follow the parent (#game-root) — same idea as reference:
-    // mode: Phaser.Scale.RESIZE, initial width/height from viewport.
     const viewport = window.visualViewport;
     const vw = Math.max(1, Math.round(viewport?.width ?? window.innerWidth));
     const vh = Math.max(1, Math.round(viewport?.height ?? window.innerHeight));
 
+    // Pure Phaser.Scale.RESIZE matches the *browser* pixel size, so on 4K the game
+    // world becomes ~3840×2160 — heavy, glitchy layout, and “collapsed” sprites.
+    // Fixed *design* size + ENVELOP: internal coords stay stable; canvas scales to
+    // fill #game-root (same visual as “responsive”, safe on 4K / high-DPR).
+    const isPortrait = vh >= vw;
+    const isCompact = Math.min(vw, vh) <= 900;
+    const baseWidth = isPortrait && isCompact ? 720 : 1920;
+    const baseHeight = isPortrait && isCompact ? 1280 : 1080;
+
     const config = {
         type: Phaser.AUTO,
         parent: "game-root",
-        width: vw,
-        height: vh,
+        width: baseWidth,
+        height: baseHeight,
         resolution: 1,
         render: {
             antialias: true,
@@ -22,8 +29,10 @@ window.addEventListener("load", () => {
         },
         backgroundColor: GAME_CONFIG.backgroundColor,
         scale: {
-            mode: Phaser.Scale.RESIZE,
-            autoCenter: Phaser.Scale.CENTER_BOTH
+            mode: Phaser.Scale.ENVELOP,
+            autoCenter: Phaser.Scale.CENTER_BOTH,
+            width: baseWidth,
+            height: baseHeight
         },
         scene: [
             BootScene,
