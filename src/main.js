@@ -6,7 +6,7 @@ import GameScene from "./scenes/GameScene.js";
 window.addEventListener("load", () => {
     // Fixed internal canvas sizes:
     // - Desktop: 1920x1080 and ENVELOP (fills full screen, crops a little if needed)
-    // - Mobile portrait: 720x1280 and ENVELOP (portrait, full screen cover)
+    // - Mobile portrait: 720x1280 and FIT (portrait, fully visible)
     const viewport = window.visualViewport;
     const vw = Math.round(viewport?.width ?? window.innerWidth);
     const vh = Math.round(viewport?.height ?? window.innerHeight);
@@ -15,7 +15,7 @@ window.addEventListener("load", () => {
 
     const baseWidth = (isPortrait && isSmallScreen) ? 720 : (GAME_CONFIG.baseWidth || 1920);
     const baseHeight = (isPortrait && isSmallScreen) ? 1280 : (GAME_CONFIG.baseHeight || 1080);
-    const scaleMode = (isPortrait && isSmallScreen) ? Phaser.Scale.ENVELOP : Phaser.Scale.ENVELOP;
+    const scaleMode = (isPortrait && isSmallScreen) ? Phaser.Scale.FIT : Phaser.Scale.ENVELOP;
 
     const config = {
         type: Phaser.AUTO,
