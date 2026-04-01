@@ -72,6 +72,7 @@
     flex-direction: column;
     justify-content: space-between; /* Header at top, Bet at bottom */
     padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
     transform: scale(var(--ui-scale));
     transform-origin: top left;
     width: calc(100% / var(--ui-scale));
@@ -112,6 +113,50 @@
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
+/* Mobile-only top bar (balance + multiplier) */
+.bet-topbar {
+    width: min(800px, calc(100% - 24px));
+    margin: 0 auto;
+    padding: 10px 14px;
+    border-radius: 16px;
+    display: none;
+    gap: 14px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.mobile-only { display: none; }
+
+/* Mobile: floating stats directly above bottom bar */
+.mobile-bar-wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mobile-float-stats {
+    display: none;
+    width: min(800px, calc(100% - 24px));
+    margin: 0 auto;
+    pointer-events: none;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.mobile-stat {
+    pointer-events: none;
+    flex: 0 0 auto;
+    min-width: 150px;
+    max-width: 48%;
+    padding: 10px 12px;
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+.mobile-stat .bet-label { font-size: 10px; line-height: 1; }
+.mobile-stat .bet-value { font-size: 16px; line-height: 1.05; }
+
 /* Betting Panel */
 .bet-panel {
     width: 100%;
@@ -123,6 +168,123 @@
     align-items: center;
     gap: 16px;
     transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+/* Pengu Sport-style bottom bar (HTML UI) */
+.pengu-bar {
+    width: min(1100px, calc(100% - 24px));
+    margin: 0 auto;
+    padding: 10px 12px;
+    border-radius: 18px;
+    align-self: center;
+}
+
+.pengu-row {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 0.95fr 0.85fr 96px 64px;
+    gap: 10px;
+    align-items: center;
+}
+
+.pengu-cell {
+    position: relative;
+    height: 56px;
+    border-radius: 14px;
+    background: rgba(2, 6, 23, 0.40);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: left;
+    overflow: hidden;
+}
+
+.pengu-select {
+    cursor: pointer;
+    user-select: none;
+    pointer-events: auto;
+    text-align: left;
+}
+
+.pengu-label {
+    font-size: clamp(10px, 1.05vw, 11px);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(226, 232, 240, 0.72);
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pengu-value {
+    font-family: 'Bubblegum Sans', 'Outfit', sans-serif;
+    font-size: clamp(16px, 1.55vw, 20px);
+    font-weight: 800;
+    color: var(--text-main);
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pengu-value.success { color: var(--accent-success); }
+.pengu-value.warning { color: var(--accent-warning); }
+
+.pengu-chev {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    font-size: 14px;
+    color: rgba(226, 232, 240, 0.65);
+}
+
+.pengu-play-wrap {
+    position: relative;
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pengu-play {
+    pointer-events: auto;
+    width: 72px;
+    height: 72px;
+    border-radius: 999px;
+    border: 3px solid rgba(2, 6, 23, 0.55);
+    background: radial-gradient(circle at 30% 30%, #86efac, #22c55e 55%, #15803d 100%);
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.55),
+        0 0 0 4px rgba(34, 197, 94, 0.18);
+    display: grid;
+    place-items: center;
+    transform: translateY(-8px);
+}
+
+.pengu-play:active {
+    transform: translateY(-6px) scale(0.98);
+}
+
+.pengu-play-icon {
+    font-size: 28px;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+    margin-left: 2px;
+}
+
+.pengu-icon {
+    pointer-events: auto;
+    height: 56px;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(2, 6, 23, 0.40);
+    color: rgba(226, 232, 240, 0.9);
+    font-weight: 900;
+    font-size: 16px;
 }
 
 .bet-section {
@@ -418,8 +580,57 @@
 /* Mobile Adjustments (Horizontal Scaling) */
 @media (max-width: 768px) {
     #ui-root {
-        padding: 4px; /* Move closer to bottom */
+        padding: 10px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
     }
+
+    .mobile-only { display: flex; }
+    .bet-topbar { display: none; } /* legacy */
+    .mobile-float-stats { display: flex; }
+
+    /* Hide balance/multiplier inside the main bar on mobile */
+    #ui-top-row { display: none; }
+    .desktop-only { display: none !important; }
+
+    /* Make the bottom bar span full width */
+    .bet-panel {
+        width: calc(100% - 16px);
+        max-width: none;
+        margin: 0 auto;
+        padding: 10px 12px;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        gap: 0;
+    }
+
+    .controls-group {
+        width: 100%;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    /* Pengu bar mobile layout */
+    .pengu-bar { width: calc(100% - 16px); padding: 10px; border-radius: 16px; }
+    .pengu-row {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+            "balance multiplier"
+            "speed bet"
+            "play autoplay";
+        gap: 10px;
+        align-items: center;
+    }
+    .pengu-row > :nth-child(1) { grid-area: balance; }
+    .pengu-row > :nth-child(2) { grid-area: multiplier; }
+    .pengu-row > :nth-child(3) { grid-area: speed; }
+    .pengu-row > :nth-child(4) { grid-area: bet; }
+    .pengu-row > :nth-child(5) { grid-area: play; justify-self: center; }
+    .pengu-row > :nth-child(6) { grid-area: autoplay; }
+    .pengu-cell { height: 54px; }
+    .pengu-play { transform: translateY(0); width: 74px; height: 74px; }
+    .pengu-play:active { transform: scale(0.98); }
+    .pengu-icon { height: 54px; }
 
     .bet-panel {
         grid-template-columns: 1fr auto 1fr; /* Keep 3-column */

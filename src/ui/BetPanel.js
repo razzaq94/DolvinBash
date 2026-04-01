@@ -303,7 +303,7 @@ export default class BetPanel {
     }
 
     cycleSpeedMode() {
-        const order = ["SLOW", "NORMAL", "FAST"];
+        const order = ["SLOW", "NORMAL", "FAST", "ULTRA"];
         const index = order.indexOf(this.speedMode);
         const nextIndex = (index + 1) % order.length;
         this.speedMode = order[nextIndex];

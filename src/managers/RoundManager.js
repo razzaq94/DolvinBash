@@ -48,6 +48,8 @@ export default class RoundManager {
             speedMode: this.currentSpeedMode,
             volatility: this.currentVolatility
         });
+        const speedCfg = GAME_CONFIG.speedModes?.[this.currentSpeedMode] || GAME_CONFIG.speedModes?.NORMAL || {};
+        this.scene.setGameplayTimeScale?.(speedCfg.timeScale ?? 1);
         this.currentPattern = this.pickEncounterPattern();
 
         this.scene.resetCamera();

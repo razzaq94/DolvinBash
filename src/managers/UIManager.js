@@ -23,6 +23,9 @@ export default class UIManager {
         this.autoPlayOverlay = null;
         this.autoPlayRemaining = 0;
         this.autoPlaySelected = false;
+
+        this.speedMode = GAME_CONFIG.round.defaultSpeedMode || "NORMAL";
+        this.speedOverlay = null;
     }
 
     createAll() {
@@ -33,11 +36,31 @@ export default class UIManager {
     initHtmlUI() {
         if (!this.root) return;
         this.root.innerHTML = "";
+        this.loadUiPrefs();
         this.createHeader();
         this.createBetPanel();
         this.createResultOverlay();
         this.updateBet(this.bet);
         this.updateBalance(this.balance);
+    }
+
+    loadUiPrefs() {
+        try {
+            const savedSpeed = String(window.localStorage?.getItem("dolvin_speedMode") || "").toUpperCase();
+            if (savedSpeed && GAME_CONFIG.speedModes?.[savedSpeed]) {
+                this.speedMode = savedSpeed;
+            }
+        } catch {
+            // ignore storage errors
+        }
+    }
+
+    saveUiPrefs() {
+        try {
+            window.localStorage?.setItem("dolvin_speedMode", String(this.speedMode || "NORMAL"));
+        } catch {
+            // ignore storage errors
+        }
     }
 
     createHeader() {
@@ -50,6 +73,24 @@ export default class UIManager {
     }
 
     createBetPanel() {
+        // Mobile-only: floating Balance + Multiplier boxes right above the bottom bar.
+        const mobileFloat = document.createElement("div");
+        mobileFloat.className = "mobile-float-stats mobile-only";
+        mobileFloat.id = "ui-mobile-float-stats";
+        mobileFloat.innerHTML = `
+            <div class="mobile-stat glass-panel">
+                <div class="bet-label">Balance</div>
+                <div id="ui-balance-top" class="bet-value success">0.00</div>
+            </div>
+            <div class="mobile-stat glass-panel" style="text-align:right;">
+                <div class="bet-label">Multiplier</div>
+                <div id="ui-multiplier-top" class="bet-value warning">x1.00</div>
+            </div>
+        `;
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "mobile-bar-wrap";
+
         const betPanel = document.createElement("div");
         betPanel.className = "bet-panel glass-panel";
         betPanel.id = "ui-bet-panel";
@@ -69,6 +110,7 @@ export default class UIManager {
                     <span id="ui-bet" class="bet-value">10</span>
                 </div>
                 <button id="ui-btn-plus" class="btn-mode btn-icon">+</button>
+                <button id="ui-btn-speed" class="btn-mode btn-icon">S</button>
                 <button id="ui-btn-autoplay" class="btn-mode btn-icon autoplay-btn"></button>
                 <button id="ui-btn-play" class="btn-main">PLAY</button>
             </div>
@@ -78,7 +120,9 @@ export default class UIManager {
                 <span id="ui-multiplier" class="bet-value warning">x1.00</span>
             </div>
         `;
-        this.root.appendChild(betPanel);
+        wrapper.appendChild(mobileFloat);
+        wrapper.appendChild(betPanel);
+        this.root.appendChild(wrapper);
 
         document.getElementById("ui-btn-minus")?.addEventListener("click", () => {
             this.playUiClick();
@@ -106,8 +150,15 @@ export default class UIManager {
             this.toggleAutoPlay();
         });
 
+        document.getElementById("ui-btn-speed")?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.playUiClick();
+            this.toggleSpeed();
+        });
+
         // Initial label state
         this.setAutoPlayRemaining(0);
+        this.updateSpeedButton();
     }
 
     createResultOverlay() {
@@ -182,6 +233,8 @@ export default class UIManager {
         this.balance = balance;
         const el = document.getElementById("ui-balance");
         if (el) el.textContent = Number(balance).toFixed(2);
+        const elTop = document.getElementById("ui-balance-top");
+        if (elTop) elTop.textContent = Number(balance).toFixed(2);
     }
 
     updateMultiplier(value) {
@@ -190,6 +243,8 @@ export default class UIManager {
         
         const el = document.getElementById("ui-multiplier");
         if (el) el.textContent = formatted;
+        const elTop = document.getElementById("ui-multiplier-top");
+        if (elTop) elTop.textContent = formatted;
 
         this.hudPanel?.setMultiplier(value);
     }
@@ -422,6 +477,79 @@ export default class UIManager {
         this.autoPlayOverlay = null;
     }
 
+    toggleSpeed() {
+        if (this.speedOverlay) {
+            this.closeSpeed();
+            return;
+        }
+        this.openSpeed();
+    }
+
+    openSpeed() {
+        if (!this.root || this.speedOverlay) return;
+
+        const overlay = document.createElement("div");
+        overlay.className = "quickbet-overlay";
+        overlay.addEventListener("click", () => this.closeSpeed());
+
+        const panel = document.createElement("div");
+        panel.className = "quickbet-panel glass-panel";
+        panel.addEventListener("click", (e) => e.stopPropagation());
+
+        const title = document.createElement("div");
+        title.className = "quickbet-title";
+        title.textContent = "Speed";
+
+        const grid = document.createElement("div");
+        grid.className = "quickbet-grid";
+
+        const order = ["SLOW", "NORMAL", "FAST", "ULTRA"];
+        order.forEach((mode) => {
+            if (!GAME_CONFIG.speedModes?.[mode]) return;
+            const btn = document.createElement("button");
+            btn.className = "quickbet-btn btn-mode";
+            btn.type = "button";
+            btn.textContent = mode;
+            if (mode === this.speedMode) {
+                btn.style.borderColor = "rgba(74, 222, 128, 0.65)";
+            }
+            btn.addEventListener("click", () => {
+                this.playUiClick();
+                this.speedMode = mode;
+                this.saveUiPrefs();
+                this.updateSpeedButton();
+                this.closeSpeed();
+            });
+            grid.appendChild(btn);
+        });
+
+        panel.appendChild(title);
+        panel.appendChild(grid);
+        overlay.appendChild(panel);
+        this.root.appendChild(overlay);
+        this.speedOverlay = overlay;
+    }
+
+    closeSpeed() {
+        if (this.speedOverlay) {
+            this.speedOverlay.remove();
+        }
+        this.speedOverlay = null;
+    }
+
+    updateSpeedButton() {
+        const el = document.getElementById("ui-btn-speed");
+        if (!el) return;
+        const mode = String(this.speedMode || "NORMAL").toUpperCase();
+        // Compact like reference: show current mode short.
+        el.textContent =
+            mode === "SLOW" ? "S" :
+            mode === "FAST" ? "F" :
+            mode === "ULTRA" ? "U" :
+            "N";
+        el.title = `Speed: ${mode}`;
+    }
+
     setAutoPlayRemaining(remaining) {
         const r = Math.max(0, Number(remaining) || 0);
         this.autoPlayRemaining = r;
@@ -448,7 +576,7 @@ export default class UIManager {
     getCurrentBet() { return this.bet; }
     getAutoPlayCount() { return this.autoPlayCount; }
     getAutoPlaySelected() { return !!this.autoPlaySelected; }
-    getSpeedMode() { return "NORMAL"; }
+    getSpeedMode() { return this.speedMode || "NORMAL"; }
     getVolatility() { return "NORMAL"; }
     updateCombo(payload) { this.hudPanel?.setCombo(payload?.comboCount, payload?.comboWindowRatio); }
 }

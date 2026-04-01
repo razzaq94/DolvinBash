@@ -28,6 +28,7 @@ export default class GameScene extends Phaser.Scene {
         this.worldWidth = GAME_CONFIG.world.width;
 
         this.kicker = null;
+        this.gameplayTimeScale = 1;
     }
 
     create() {
@@ -299,7 +300,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     update(time, delta) {
-        const deltaSeconds = delta / 1000;
+        const timeScale = Math.max(0.5, Math.min(1.6, Number(this.gameplayTimeScale) || 1));
+        const deltaSeconds = (delta / 1000) * timeScale;
 
         this.dollController?.update(deltaSeconds);
 
@@ -308,6 +310,14 @@ export default class GameScene extends Phaser.Scene {
         }
 
         this.updateCamera(deltaSeconds);
+    }
+
+    setGameplayTimeScale(scale = 1) {
+        const s = Math.max(0.5, Math.min(1.6, Number(scale) || 1));
+        this.gameplayTimeScale = s;
+        // Make tweens/timers also match the selected speed.
+        if (this.time) this.time.timeScale = s;
+        if (this.tweens) this.tweens.timeScale = s;
     }
 
     updateCamera(deltaSeconds) {

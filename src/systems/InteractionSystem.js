@@ -87,6 +87,11 @@ export default class InteractionSystem {
                 item.effect = this.parseEffectString(itemData.label || "B");
                 this.bombs.push(item);
             } else if (itemData.type === "hazard") {
+                // Decorative hazards were merged into the background; skip them entirely.
+                const v = String(itemData.variant || "").toLowerCase();
+                const isRoadOnly = (v === "hole" || v === "trafficcone" || v === "roadblocker");
+                if (!isRoadOnly) continue;
+
                 const hazardVisual = this.getHazardVisual(itemData.variant);
                 item = this.createHazardObject(
                     x,
@@ -612,25 +617,34 @@ export default class InteractionSystem {
     }
 
     spawnEnvironmentDecoration(groundY) {
-        // We now use a pure procedural system in update() to ensure infinite spawning.
-        // We just need to initialize the spawn pointer and the pool.
-        // Starting delay: Let the player fly clean for a good bit
-        this.nextHazardSpawnX = 2500; 
-        this.decorationHazards = [];
-        
-        // Pre-create some hidden objects for the pool
-        const count = 30;
-        for (let i = 0; i < count; i++) {
-            const item = this.createHazardObject(
-                -500, // Off-screen
-                groundY,
-                32, 32, "hazard_tree", "DECO", "hazard", -34, "tree"
-            );
-            item.active = false;
-            item.shape.setVisible(false);
-            this.decorationHazards.push(item);
-            this.hazards.push(item);
-            this.allItems.push(item);
+        // Decorative sidewalk hazards were merged into the background (no longer spawned).
+        // We still need a pool to procedurally spawn *road colliders* (hole/cone/blocker).
+        this.nextHazardSpawnX = 2500;
+
+        if (!this.decorationHazards.length) {
+            this.decorationHazards = [];
+            const count = 24;
+            for (let i = 0; i < count; i++) {
+                const visual = this.getHazardVisual("trafficcone");
+                const item = this.createHazardObject(
+                    -600,
+                    groundY,
+                    visual.width,
+                    visual.height,
+                    visual.texture,
+                    visual.label,
+                    "hazard",
+                    0,
+                    "trafficcone"
+                );
+                item.active = false;
+                item.hasCollided = false;
+                item.shape.setVisible(false);
+                item.text.setVisible(false);
+                this.decorationHazards.push(item);
+                this.hazards.push(item);
+                this.allItems.push(item);
+            }
         }
     }
 
@@ -695,9 +709,15 @@ export default class InteractionSystem {
 
         const dollCircleRadius = this.getDollCircleRadius();
 
+        // Once the doll is on the ground, we don't allow any more "number" collisions
+        // (prevents going back up from late sky hits while rolling on the road).
+        const groundY = this.getGroundY();
+        const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+        const isOnGroundNow = dollY >= (collisionThreshold - 1);
+
         // Resolve circle collisions using swept "best hit" to avoid wrong/missed hits
         // when multiple nodes are close together.
-        const pickupHit = this.findBestCircleHitSwept(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+        const pickupHit = isOnGroundNow ? null : this.findBestCircleHitSwept(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (pickupHit) {
             const item = pickupHit;
             const effect = item.effect || { type: "add", value: 1 };
@@ -759,7 +779,8 @@ export default class InteractionSystem {
         }
 
         // Swept collision for bombs to prevent "miss" at high speed.
-        this.checkCircleCollisionsSwept(this.bombs, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
+        if (!isOnGroundNow) {
+            this.checkCircleCollisionsSwept(this.bombs, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
             const effect = item.effect || { type: "subtract", value: 1 };
             this.resetCombo();
 
@@ -790,19 +811,21 @@ export default class InteractionSystem {
                 this.emitMultiplierChanged();
                 this.dollController.updateScoreValue?.(this.multiplier);
             }
-        });
-
-        this.prevDollX = dollX;
-        this.prevDollY = dollY;
+            });
+        }
 
 
 
-        // Professional collision core: close to character torso, not full sprite extents.
-        const dollW = (this.dollController.doll?.displayWidth || 120) * 0.30;
-        const dollH = (this.dollController.doll?.displayHeight || 120) * 0.36;
+        // Professional collision core:
+        // - bats: tighter torso
+        // - road obstacles: slightly larger + swept to avoid landing/roll misses
+        const dollWTorso = (this.dollController.doll?.displayWidth || 120) * 0.30;
+        const dollHTorso = (this.dollController.doll?.displayHeight || 120) * 0.36;
+        const dollWRoad = (this.dollController.doll?.displayWidth || 120) * 0.44;
+        const dollHRoad = (this.dollController.doll?.displayHeight || 120) * 0.50;
 
         // Bat interactions (rect collision)
-        this.checkRectCollisions(this.bats, dollX, dollY, dollW, dollH, (item) => {
+        this.checkRectCollisions(this.bats, dollX, dollY, dollWTorso, dollHTorso, (item) => {
             if (item.hasCollided) return;
             item.hasCollided = true;
 
@@ -816,67 +839,56 @@ export default class InteractionSystem {
 
             this.consumeObject(item);
         });
-        
-        this.checkRectCollisions(this.hazards, dollX, dollY, dollW, dollH, (item) => {
-            if (item.hasCollided) return;
-            // Colliders: hole + road obstacles only. Side-walk decoration is ignored.
-            const isRoadCollider = (item.variant === "hole" || item.variant === "trafficcone" || item.variant === "roadblocker");
-            if (!isRoadCollider) return;
 
+        // Road obstacle collisions: swept + near-ground to prevent landing misses.
+        const roadHit = this.findBestRectHitSwept(
+            this.hazards,
+            prevDollX,
+            prevDollY,
+            dollX,
+            dollY,
+            dollWRoad,
+            dollHRoad,
+            (it) => (it.variant === "hole" || it.variant === "trafficcone" || it.variant === "roadblocker")
+        );
+
+        if (roadHit && !roadHit.hasCollided) {
+            const item = roadHit;
             const groundY = this.getGroundY();
             const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
             const isOnGround = dollY >= (collisionThreshold - 1);
+            const nearGround = dollY >= (collisionThreshold - 28);
 
-            item.hasCollided = true; // Mark as collided so we don't hit it again
-            
+            // Mark collided first to avoid double-processing in same frame.
+            item.hasCollided = true;
+
+            // Always treat these as hazards (trail red, hurt, etc.)
             this.spawnImpactParticles("hazard", item.x, item.y);
             this.dollController.onGameplayInteraction?.("hazard");
             this.dollController.setTrailTheme?.("minus", 0);
             this.resetCombo();
 
-            if (item.variant === "hole") {
-                // Ground hole is fatal - instant end
+            // Only trigger when grounded/near-ground (prevents weird mid-air hits).
+            if (!isOnGround && !nearGround) {
+                // Let it pass; we only want road hits close to the floor.
+            } else if (item.variant === "hole") {
                 this.dollController.disableTrailsNow?.();
                 this.interactionsEnabled = false;
                 this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
-                this.onHazardHit?.(item, true); // true = fatal
-                return;
-            }
-
-            if (item.variant === "trafficcone" || item.variant === "roadblocker") {
-                // Major road obstacles should only kill when the doll is on the ground.
-                if (!isOnGround) {
-                    // In-air touch looks odd; ignore and let doll land naturally.
-                    return;
-                }
+                this.onHazardHit?.(item, true);
+            } else {
+                // trafficcone / roadblocker -> instant dead/stop
                 this.interactionsEnabled = false;
                 this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
                 this.onHazardHit?.(item, true);
-                // Stop AFTER marking hazard so RoundManager doesn't apply happywin.
                 this.dollController.stopImmediatelyDead?.();
-                return;
             }
-
-            // Other hazards - apply downward force and multiplier penalty
-            const penalty = 0.5; // Fixed penalty for better transparency
-            const prevMultiplier = this.multiplier;
-            this.multiplier = this.clampMultiplier(this.multiplier - penalty);
-
-            if (this.multiplier !== prevMultiplier) {
-                this.emitMultiplierChanged();
-                this.dollController.updateScoreValue?.(this.multiplier);
-            }
-
-            this.showFloatingText(item.x, item.y - 40, `-${penalty.toFixed(1)}`, "#f43f5e"); // Vibrant Red
-            this.applyRandomCollisionImpulse("hazard");
-            this.scene.audioManager?.play("sfx_hazard", { volume: 0.5 });
-            this.onHazardHit?.(item, false); // false = not fatal
-        });
+        }
 
         let bestImpulse = null;
         let hasDrop = false;
 
-        const skyHit = this.findBestCircleHitSwept(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+        const skyHit = isOnGroundNow ? null : this.findBestCircleHitSwept(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (skyHit) {
             const item = skyHit;
             // CRITICAL: snapshot effect/label/pos BEFORE recycling (recycle mutates text + savedEffect).
@@ -1204,6 +1216,15 @@ export default class InteractionSystem {
     }
 
     maintainHazardStream(dollX) {
+        // Requirement: don't spawn ground obstacles until the doll is actually rolling on the ground.
+        const groundY = this.getGroundY();
+        const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+        const isOnGround = (this.dollController?.position?.y ?? 0) >= (collisionThreshold - 1);
+        const isRolling = isOnGround && Math.abs(this.dollController?.velocity?.x ?? 0) > 60;
+        if (!isRolling) {
+            return;
+        }
+
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
         const cameraRight = cameraLeft + this.scene.scale.width;
@@ -1219,9 +1240,15 @@ export default class InteractionSystem {
             }
         }
 
-        // 2. Procedural Spawning: Fill area ahead of the camera
-        const spawnLimitX = cameraRight + 1500; // Maintain buffer ahead
-        while (this.nextHazardSpawnX < spawnLimitX) {
+        // 2. Procedural Spawning (random): sometimes spawn nothing.
+        // Trigger by distance travelled, but *position* the obstacle on the right side of the viewport.
+        if (dollX < this.nextHazardSpawnX) return;
+
+        // Chance to spawn an obstacle this time (otherwise "nothing" spawns).
+        const spawnChance = 0.92;
+        const shouldSpawn = Math.random() < spawnChance;
+
+        if (shouldSpawn) {
             // Find an inactive item from the pool
             let candidate = null;
             for (let i = 0; i < this.decorationHazards.length; i++) {
@@ -1242,21 +1269,23 @@ export default class InteractionSystem {
             }
 
             if (candidate) {
-                this.placeHazardProcedural(candidate, this.nextHazardSpawnX);
+                const viewW = Math.max(1, this.scene.scale.width);
+                // Spawn only at the right corner.
+                const rightCornerX = cameraRight - Math.round(viewW * 0.08);
+                const spawnX = Math.max(dollX + 240, rightCornerX);
+                this.placeHazardProcedural(candidate, spawnX);
             }
-
-            // Step forward for the next spawn
-            // WIDENED GAP: 600 to 1100 for a more professional, spaced-out feel
-            this.nextHazardSpawnX += Phaser.Math.Between(600, 1100);
         }
+
+        // Next trigger distance: random gaps so it doesn't feel patterned.
+        this.nextHazardSpawnX = dollX + Phaser.Math.Between(820, 1650);
     }
 
     placeHazardProcedural(item, x) {
         // NOTE: Cats removed from the game.
         // Road colliders: trafficcone/roadblocker/hole.
-        // Decorative sidewalk: tree/lamp/pole/water (spawn throughout, but ignored for collision).
-        const variants = ["trafficcone", "roadblocker", "hole", "tree", "lamp_post", "pole", "water"];
-        const weights = [24, 14, 8, 20, 16, 10, 8]; // 100 total
+        const variants = ["trafficcone", "roadblocker", "hole"];
+        const weights = [45, 35, 20]; // 100 total (more variety)
         let roll = Phaser.Math.Between(1, 100);
         let variant = "trafficcone";
         
@@ -1935,6 +1964,80 @@ export default class InteractionSystem {
                 callback(item);
             }
         }
+    }
+
+    // Swept AABB collision to prevent "miss" at high speed (landing/rolling into road obstacles).
+    // Returns the first hit item (closest along the swept path), or null.
+    findBestRectHitSwept(items, x0, y0, x1, y1, dollHalfW, dollHalfH, filterFn = null) {
+        let bestItem = null;
+        let bestT = Infinity;
+
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item.active || item.hasCollided) continue;
+            if (filterFn && !filterFn(item)) continue;
+
+            const originY = item.shape?.originY ?? 0.5;
+
+            const isTall = (item.variant === "tree" || item.variant === "lamp_post" || item.variant === "pole");
+            const isHole = (item.variant === "hole");
+            const isWater = (item.variant === "water");
+            const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
+
+            const wFactor = isHole ? 0.42 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.55 : 0.62)));
+            const hFactor = isHole ? 0.42 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.55 : 0.66)));
+
+            const itemHalfW = (item.width * wFactor) * 0.5;
+            const itemHalfH = (item.height * hFactor) * 0.5;
+
+            const left = item.x - itemHalfW;
+            const right = item.x + itemHalfW;
+            const top = item.y - item.height * originY + (item.height * (1 - hFactor) * 0.5);
+            const bottom = item.y + item.height * (1 - originY) - (item.height * (1 - hFactor) * 0.5);
+
+            // Expand obstacle AABB by doll extents (Minkowski sum) and raycast point through it.
+            const exLeft = left - dollHalfW;
+            const exRight = right + dollHalfW;
+            const exTop = top - dollHalfH;
+            const exBottom = bottom + dollHalfH;
+
+            let tEnter = 0;
+            let tExit = 1;
+
+            if (Math.abs(dx) < 1e-6) {
+                if (x0 < exLeft || x0 > exRight) continue;
+            } else {
+                const invDx = 1 / dx;
+                let tx1 = (exLeft - x0) * invDx;
+                let tx2 = (exRight - x0) * invDx;
+                if (tx1 > tx2) [tx1, tx2] = [tx2, tx1];
+                tEnter = Math.max(tEnter, tx1);
+                tExit = Math.min(tExit, tx2);
+                if (tEnter > tExit) continue;
+            }
+
+            if (Math.abs(dy) < 1e-6) {
+                if (y0 < exTop || y0 > exBottom) continue;
+            } else {
+                const invDy = 1 / dy;
+                let ty1 = (exTop - y0) * invDy;
+                let ty2 = (exBottom - y0) * invDy;
+                if (ty1 > ty2) [ty1, ty2] = [ty2, ty1];
+                tEnter = Math.max(tEnter, ty1);
+                tExit = Math.min(tExit, ty2);
+                if (tEnter > tExit) continue;
+            }
+
+            if (tEnter >= 0 && tEnter <= 1 && tEnter < bestT) {
+                bestT = tEnter;
+                bestItem = item;
+            }
+        }
+
+        return bestItem;
     }
 
     consumeObject(item) {

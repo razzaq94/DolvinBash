@@ -63,8 +63,12 @@ export default class PreloadScene extends Phaser.Scene {
         const audioPrefix = "https://labs.phaser.io/assets/audio/SoundEffects/";
         this.load.audio("sfx_bounce", audioPrefix + "squit.mp3");
         this.load.audio("sfx_hazard", "src/sounds/hurt.mp3");
-        // Use local audio for slide so it never misses cache on high-DPR/mobile browsers.
+        // Use local audio for rolling/spin so it never misses cache on high-DPR/mobile browsers.
+        this.load.audio("sfx_spin", "src/sounds/spin.mp3");
+        // Keep sfx_slide reserved (legacy key) for any future slide/hit loop if needed.
         this.load.audio("sfx_slide", "src/sounds/hit.mp3");
+        // One-shot ground impact hit
+        this.load.audio("sfx_hit", "src/sounds/hit.mp3");
 
         // Win/Loss + Background music
         this.load.audio("sfx_win", "src/sounds/gamewin.mp3");

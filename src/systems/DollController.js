@@ -63,6 +63,7 @@ export default class DollController {
         this.isFallingInHole = false;
         this.onHoleFallComplete = null;
         this.groundedMs = 0;
+        this.wasOnGround = false;
     }
 
     create() {
@@ -100,6 +101,7 @@ export default class DollController {
         this.airBoostTimerMs = 0;
         this.expressionLockTimerMs = 0;
         this.happySpinRemainingDeg = 0;
+        this.wasOnGround = false;
 
         this.scoreContainer = this.scene.add.container(startX, startY).setDepth(45);
         this.scoreHistory = [];
@@ -132,6 +134,7 @@ export default class DollController {
         this.isFallingInHole = false;
         this.expressionLockTimerMs = 0;
         this.happySpinRemainingDeg = 0;
+        this.wasOnGround = false;
         this.onHoleFallComplete = null;
         this.groundedMs = 0;
 
@@ -309,6 +312,14 @@ export default class DollController {
         const isOnGround = !this.isFallingInHole && this.position.y >= collisionThreshold - 1;
         this.groundedMs = isOnGround ? (this.groundedMs + (deltaSeconds * 1000)) : 0;
 
+        // Play a one-shot "hit" when we touch ground (air -> ground transition).
+        if (isOnGround && !this.wasOnGround) {
+            const impact = Phaser.Math.Clamp(Math.abs(this.velocity.y) / 900, 0.15, 1);
+            // Requirement: play hurt sound on ground impact.
+            this.scene.audioManager?.play("sfx_hazard", { volume: 0.45 + (impact * 0.45) });
+        }
+        this.wasOnGround = isOnGround;
+
         if (isOnGround) {
             // Speed-synced rolling: circumference of visual match travel
             const rollFactor = 0.22; 
@@ -340,7 +351,13 @@ export default class DollController {
             } else {
                 this.velocity.y = 0;
                 const frictionMultiplier = this.speedTuning.frictionMultiplier ?? 1;
-                const effectiveFriction = Math.max(0.997, (GAME_CONFIG.doll.friction * frictionMultiplier));
+                // Friction is a damping factor and must stay < 1.
+                // Use an exponential model so:
+                // - frictionMultiplier > 1 => stronger friction (more slowdown)
+                // - frictionMultiplier < 1 => weaker friction (less slowdown)
+                const baseFriction = Phaser.Math.Clamp(GAME_CONFIG.doll.friction ?? 0.995, 0.90, 0.9999);
+                const fm = Phaser.Math.Clamp(Number(frictionMultiplier) || 1, 0.6, 1.6);
+                const effectiveFriction = Phaser.Math.Clamp(Math.pow(baseFriction, fm), 0.90, 0.9999);
                 this.velocity.x *= effectiveFriction;
                 if (!this.isExpressionLocked()) {
                     this.setExpression("dizzy");
@@ -546,11 +563,12 @@ export default class DollController {
         if (!this.doll || !this.scene.sound) return;
 
         // ONLY play sound when on ground AND rotating/sliding (kalabaazi)
-        const isRollingOnGround = isOnGround && Math.abs(this.velocity.x) > 60;
+        // Use a slightly lower threshold so slow mode still triggers sound.
+        const isRollingOnGround = isOnGround && Math.abs(this.velocity.x) > 25;
 
         if (isRollingOnGround) {
             if (!this.slideSound) {
-                this.slideSound = this.scene.sound.add("sfx_slide", { loop: true, volume: 0.2 });
+                this.slideSound = this.scene.sound.add("sfx_spin", { loop: true, volume: 1 });
                 this.slideSound.play();
             } else if (!this.slideSound.isPlaying) {
                 this.slideSound.play();
@@ -558,8 +576,9 @@ export default class DollController {
             
             // Adjust volume/rate based on speed for "ragar" feel
             const speedFactor = Phaser.Math.Clamp(Math.abs(this.velocity.x) / 600, 0.1, 1);
-            this.slideSound.setVolume(0.1 + (speedFactor * 0.25));
-            this.slideSound.setRate(0.8 + (speedFactor * 0.4));
+            this.slideSound.setVolume(1);
+            // Slightly faster base + more speed-based ramp (still capped for sanity).
+            this.slideSound.setRate(Phaser.Math.Clamp(1.15 + (speedFactor * 0.95), 0.8, 2.0));
         } else {
             this.stopSlideSound();
         }
@@ -567,11 +586,9 @@ export default class DollController {
 
     stopSlideSound() {
         if (this.slideSound) {
-            if (this.slideSound.isPlaying) {
-                this.slideSound.stop();
-            }
-            this.slideSound.destroy();
-            this.slideSound = null;
+            if (this.slideSound.isPlaying) this.slideSound.stop();
+            // Pause/destroy churn can cause “no sound” on some mobile browsers.
+            // Keep instance and just stop; it will resume on next roll.
         }
     }
 

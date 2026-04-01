@@ -110,21 +110,32 @@ export const GAME_CONFIG = {
             launchYMultiplier: 0.9,
             gravityMultiplier: 0.92,
             frictionMultiplier: 1.015,
-            travelMultiplier: 0.92
+            travelMultiplier: 0.92,
+            timeScale: 0.75
         },
         NORMAL: {
             launchXMultiplier: 1,
             launchYMultiplier: 1,
             gravityMultiplier: 1,
             frictionMultiplier: 1,
-            travelMultiplier: 1
+            travelMultiplier: 1,
+            timeScale: 1
         },
         FAST: {
             launchXMultiplier: 1.14,
             launchYMultiplier: 1.08,
             gravityMultiplier: 1.08,
             frictionMultiplier: 0.985,
-            travelMultiplier: 1.14
+            travelMultiplier: 1.14,
+            timeScale: 1.50
+        },
+        ULTRA: {
+            launchXMultiplier: 1.65,
+            launchYMultiplier: 1.38,
+            gravityMultiplier: 1.26,
+            frictionMultiplier: 0.96,
+            travelMultiplier: 1.65,
+            timeScale: 2.30
         }
     },
 
