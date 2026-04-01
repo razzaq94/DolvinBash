@@ -18,7 +18,12 @@ export const GAME_CONFIG = {
     world: {
         groundOffsetFromBottom: 118, // Lowered from 140 to sink deeper
         groundHeight: 140,
-        width: 20000
+        width: 20000,
+
+        // Visual background (road+bushes) vertical alignment.
+        // Mobile: a bit lower, PC: a bit higher.
+        roadVerticalOffsetMobile: 230,
+        roadVerticalOffsetDesktop: 140
     },
 
     // Fine-tune road obstacle vertical placement (relative to groundY).

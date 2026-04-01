@@ -61,7 +61,7 @@ export default class GameScene extends Phaser.Scene {
 
     createBackground() {
         this.bgVerticalOffset = 0;
-        this.roadVerticalOffset = 150;
+        this.roadVerticalOffset = 210;
 
         // Separate skyline layer behind the main background
         this.skyline1 = this.add.image(0, 0, "bg_skyline")
@@ -361,12 +361,19 @@ export default class GameScene extends Phaser.Scene {
     }
 
     layoutWorld() {
-        const { width, height, stageTop, stageBottom } = this.getViewportLayout();
+        const layout = this.getViewportLayout();
+        const { width, height, stageTop, stageBottom } = layout;
         const bgTexture = this.textures.get("bg");
         const source = bgTexture?.getSourceImage?.();
         const textureWidth = source?.width || GAME_CONFIG.baseWidth;
         const textureHeight = source?.height || GAME_CONFIG.baseHeight;
         const scale = Math.max(width / textureWidth, height / textureHeight);
+
+        const roadOffset =
+            layout.isMobile
+                ? (GAME_CONFIG.world.roadVerticalOffsetMobile ?? this.roadVerticalOffset)
+                : (GAME_CONFIG.world.roadVerticalOffsetDesktop ?? this.roadVerticalOffset);
+        this.roadVerticalOffsetActive = roadOffset;
 
         if (this.skyline1 && this.skyline2) {
             const skyTexture = this.textures.get("bg_skyline");
@@ -405,9 +412,9 @@ export default class GameScene extends Phaser.Scene {
             // FIX: Math.ceil se bgWidth integer guarantee — gap nahi aayega
             const bgWidth = Math.ceil(this.bg1.displayWidth);
 
-            this.bg1.setPosition(0, Math.round(height * 0.5) + this.roadVerticalOffset);
+            this.bg1.setPosition(0, Math.round(height * 0.5) + roadOffset);
             // FIX: -1 pixel overlap hardcode — consistent seam removal
-            this.bg2.setPosition(bgWidth - 1, Math.round(height * 0.5) + this.roadVerticalOffset);
+            this.bg2.setPosition(bgWidth - 1, Math.round(height * 0.5) + roadOffset);
         }
 
         if (this.infoText) {
@@ -422,6 +429,7 @@ export default class GameScene extends Phaser.Scene {
         if (!this.bg1 || !this.bg2) return;
 
         const height = this.scale.height;
+        const roadOffset = this.roadVerticalOffsetActive ?? this.roadVerticalOffset;
 
         if (this.skyline1 && this.skyline2) {
             const skylineWidth = Math.ceil(this.skyline1.displayWidth);
@@ -479,8 +487,8 @@ export default class GameScene extends Phaser.Scene {
         const reverseCameraY = -scrollY;
 
         // FIX: Math.round on Y too — vertical sub-pixel rendering fix
-        this.bg1.y = Math.round((height * 0.5) + this.roadVerticalOffset + reverseCameraY);
-        this.bg2.y = Math.round((height * 0.5) + this.roadVerticalOffset + reverseCameraY);
+        this.bg1.y = Math.round((height * 0.5) + roadOffset + reverseCameraY);
+        this.bg2.y = Math.round((height * 0.5) + roadOffset + reverseCameraY);
     }
 
     onShutdown() {
