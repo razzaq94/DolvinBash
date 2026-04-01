@@ -55,6 +55,38 @@
     </div>
 
     <script>
+        (function uiScaleBootstrap() {
+            const DESIGN_W = 1920;
+            const DESIGN_H = 1080;
+
+            function getViewport() {
+                const vv = window.visualViewport;
+                const vw = Math.max(1, Math.round(vv?.width ?? window.innerWidth));
+                const vh = Math.max(1, Math.round(vv?.height ?? window.innerHeight));
+                return { vw, vh };
+            }
+
+            function updateUiScale() {
+                const { vw, vh } = getViewport();
+                const isPortrait = vh >= vw;
+                const isSmallScreen = Math.min(vw, vh) <= 900;
+
+                // Desktop/large: upscale UI with viewport (4K etc).
+                // Mobile portrait: keep tuned mobile CSS sizes (scale = 1).
+                let scale = 1;
+                if (!isSmallScreen && !isPortrait) {
+                    scale = Math.min(vw / DESIGN_W, vh / DESIGN_H);
+                    scale = Math.max(1, Math.min(scale, 1.85));
+                }
+
+                document.documentElement.style.setProperty("--ui-scale", String(scale));
+            }
+
+            updateUiScale();
+            window.addEventListener("resize", updateUiScale, { passive: true });
+            window.visualViewport?.addEventListener("resize", updateUiScale, { passive: true });
+        })();
+
         (function bootGame() {
             const phaserSources = [
                 "https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js",

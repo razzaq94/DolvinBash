@@ -8,6 +8,7 @@
     --accent-special: #a855f7;
     --text-main: #f8fafc;
     --text-dim: #94a3b8;
+    --ui-scale: 1;
 }
 
 /* Orientation lock: block landscape on mobile/tablet */
@@ -71,6 +72,10 @@
     flex-direction: column;
     justify-content: space-between; /* Header at top, Bet at bottom */
     padding: 12px;
+    transform: scale(var(--ui-scale));
+    transform-origin: top left;
+    width: calc(100% / var(--ui-scale));
+    height: calc(100% / var(--ui-scale));
 }
 
 #ui-root button {
