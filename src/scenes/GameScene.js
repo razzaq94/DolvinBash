@@ -61,7 +61,7 @@ export default class GameScene extends Phaser.Scene {
 
     createBackground() {
         this.bgVerticalOffset = 0;
-        this.roadVerticalOffset = 210;
+        this.roadVerticalOffset = 150;
 
         // Separate skyline layer behind the main background
         this.skyline1 = this.add.image(0, 0, "bg_skyline")
