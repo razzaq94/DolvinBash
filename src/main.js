@@ -4,24 +4,26 @@ import PreloadScene from "./scenes/PreloadScene.js";
 import GameScene from "./scenes/GameScene.js";
 
 window.addEventListener("load", () => {
+    // Fixed internal canvas sizes:
+    // - Desktop: 1920x1080 and ENVELOP (fills full screen, crops a little if needed)
+    // - Mobile portrait: 720x1280 and ENVELOP (portrait, full screen cover)
     const viewport = window.visualViewport;
-    const vw = Math.max(1, Math.round(viewport?.width ?? window.innerWidth));
-    const vh = Math.max(1, Math.round(viewport?.height ?? window.innerHeight));
-
-    // Pure Phaser.Scale.RESIZE matches the *browser* pixel size, so on 4K the game
-    // world becomes ~3840×2160 — heavy, glitchy layout, and “collapsed” sprites.
-    // Fixed *design* size + ENVELOP: internal coords stay stable; canvas scales to
-    // fill #game-root (same visual as “responsive”, safe on 4K / high-DPR).
+    const vw = Math.round(viewport?.width ?? window.innerWidth);
+    const vh = Math.round(viewport?.height ?? window.innerHeight);
     const isPortrait = vh >= vw;
-    const isCompact = Math.min(vw, vh) <= 900;
-    const baseWidth = isPortrait && isCompact ? 720 : 1920;
-    const baseHeight = isPortrait && isCompact ? 1280 : 1080;
+    const isSmallScreen = Math.min(vw, vh) <= 900;
+
+    const baseWidth = (isPortrait && isSmallScreen) ? 720 : (GAME_CONFIG.baseWidth || 1920);
+    const baseHeight = (isPortrait && isSmallScreen) ? 1280 : (GAME_CONFIG.baseHeight || 1080);
+    const scaleMode = (isPortrait && isSmallScreen) ? Phaser.Scale.ENVELOP : Phaser.Scale.ENVELOP;
 
     const config = {
         type: Phaser.AUTO,
         parent: "game-root",
         width: baseWidth,
         height: baseHeight,
+        // Force stable rendering across high-DPR devices (S24/4K with zoom/DPR changes).
+        // We intentionally keep internal resolution at 1 and let the browser scale the canvas.
         resolution: 1,
         render: {
             antialias: true,
@@ -29,7 +31,7 @@ window.addEventListener("load", () => {
         },
         backgroundColor: GAME_CONFIG.backgroundColor,
         scale: {
-            mode: Phaser.Scale.ENVELOP,
+            mode: scaleMode,
             autoCenter: Phaser.Scale.CENTER_BOTH,
             width: baseWidth,
             height: baseHeight
