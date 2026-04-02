@@ -93,6 +93,11 @@ export const GAME_CONFIG = {
         minYOffset: -520,
         maxYOffset: -110,
         nodeRadius: 20,
+        // Gameplay hit (tighter than visible text) so distant numbers do not "magnet" hit.
+        hitRadius: 15,
+        // Long single-frame sweeps are split so we do not count near-misses along the chord.
+        maxSweepSegmentPx: 46,
+        pickupHitScale: 0.82,
         minGap: 0, // New: controls minimum spacing between multipliers
         maxGap: 0, // New: controls maximum spacing between multipliers
         pool: [

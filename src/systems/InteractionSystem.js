@@ -288,6 +288,8 @@ export default class InteractionSystem {
 
     createSkyMultiplierObject(x, y, nodeCfg, yOffset) {
         const radius = GAME_CONFIG.skyMultipliers?.nodeRadius ?? 20;
+        const skyCfg = GAME_CONFIG.skyMultipliers || {};
+        const hitRadius = skyCfg.hitRadius ?? Math.round(radius * 0.65);
         const color = nodeCfg.color ?? 0xfacc15;
         
         // Solid shape hidden as per client feedback
@@ -327,6 +329,7 @@ export default class InteractionSystem {
             y,
             yOffset,
             radius,
+            hitRadius,
             shape,
             glow,
             text,
@@ -1843,8 +1846,25 @@ export default class InteractionSystem {
         const doll = this.dollController?.doll;
         const w = doll?.displayWidth || 120;
         const h = doll?.displayHeight || 120;
-        // Small core circle for pickups/numbers to avoid "far" triggers.
-        return Math.max(14, Math.min(24, Math.min(w, h) * 0.16));
+        // Slightly forgiving vs strict mode, still smaller than the full sprite.
+        return Math.max(13, Math.min(22, Math.min(w, h) * 0.145));
+    }
+
+    getCircleItemHitRadius(item) {
+        if (item?.hitRadius != null) {
+            return Math.max(0, Number(item.hitRadius) || 0);
+        }
+        const skyCfg = GAME_CONFIG.skyMultipliers || {};
+        if (item?.type === "sky_multiplier") {
+            const base = item.radius ?? skyCfg.nodeRadius ?? 20;
+            return skyCfg.hitRadius ?? Math.max(8, Math.round(base * 0.65));
+        }
+        if (item?.type === "pickup") {
+            const scale = skyCfg.pickupHitScale ?? 0.82;
+            const base = item.radius ?? 18;
+            return Math.max(8, base * scale);
+        }
+        return item?.radius ?? 0;
     }
 
     addCombo() {
@@ -1878,7 +1898,7 @@ export default class InteractionSystem {
             if (!item.active) continue;
 
             const dist = Phaser.Math.Distance.Between(dollX, dollY, item.x, item.y);
-            if (dist <= dollRadius + item.radius) {
+            if (dist <= dollRadius + this.getCircleItemHitRadius(item)) {
                 callback(item);
             }
         }
@@ -1897,7 +1917,7 @@ export default class InteractionSystem {
             const item = items[i];
             if (!item?.active) continue;
 
-            const r = (dollRadius + (item.radius ?? 0));
+            const r = (dollRadius + this.getCircleItemHitRadius(item));
             const px = item.x;
             const py = item.y;
 
@@ -1924,51 +1944,65 @@ export default class InteractionSystem {
     }
 
     findBestCircleHitSwept(items, prevX, prevY, nextX, nextY, dollRadius) {
-        const ax = prevX;
-        const ay = prevY;
-        const bx = nextX;
-        const by = nextY;
-        const abx = bx - ax;
-        const aby = by - ay;
-        const abLenSq = (abx * abx) + (aby * aby);
+        const skyCfg = GAME_CONFIG.skyMultipliers || {};
+        const maxSeg = skyCfg.maxSweepSegmentPx ?? 46;
+        const dx = nextX - prevX;
+        const dy = nextY - prevY;
+        const len = Math.sqrt((dx * dx) + (dy * dy));
+        const steps = len <= maxSeg || len < 1e-6 ? 1 : Math.ceil(len / maxSeg);
 
         let bestItem = null;
         let bestDist = Infinity;
-        let bestT = Infinity;
+        let bestGlobalT = Infinity;
 
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (!item?.active) continue;
+        for (let s = 0; s < steps; s++) {
+            const u0 = s / steps;
+            const u1 = (s + 1) / steps;
+            const ax = prevX + dx * u0;
+            const ay = prevY + dy * u0;
+            const bx = prevX + dx * u1;
+            const by = prevY + dy * u1;
+            const abx = bx - ax;
+            const aby = by - ay;
+            const abLenSq = (abx * abx) + (aby * aby);
 
-            const r = (dollRadius + (item.radius ?? 0));
-            const px = item.x;
-            const py = item.y;
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (!item?.active) continue;
 
-            // If doll didn't move, fall back to point distance
-            if (abLenSq <= 0.000001) {
-                const dist = Phaser.Math.Distance.Between(nextX, nextY, px, py);
-                if (dist <= r && dist < bestDist) {
-                    bestDist = dist;
-                    bestT = 0;
-                    bestItem = item;
+                const r = (dollRadius + this.getCircleItemHitRadius(item));
+                const px = item.x;
+                const py = item.y;
+
+                if (abLenSq <= 0.000001) {
+                    const dist = Phaser.Math.Distance.Between(bx, by, px, py);
+                    const gT = u1;
+                    if (dist <= r && (gT < bestGlobalT - 1e-6 || (Math.abs(gT - bestGlobalT) <= 1e-6 && dist < bestDist))) {
+                        bestDist = dist;
+                        bestGlobalT = gT;
+                        bestItem = item;
+                    }
+                    continue;
                 }
-                continue;
-            }
 
-            const apx = px - ax;
-            const apy = py - ay;
-            let t = ((apx * abx) + (apy * aby)) / abLenSq;
-            t = Phaser.Math.Clamp(t, 0, 1);
-            const cx = ax + (abx * t);
-            const cy = ay + (aby * t);
-            const dist = Phaser.Math.Distance.Between(cx, cy, px, py);
+                const apx = px - ax;
+                const apy = py - ay;
+                let t = ((apx * abx) + (apy * aby)) / abLenSq;
+                t = Phaser.Math.Clamp(t, 0, 1);
+                const cx = ax + (abx * t);
+                const cy = ay + (aby * t);
+                const dist = Phaser.Math.Distance.Between(cx, cy, px, py);
 
-            if (dist <= r) {
-                // Prefer closest to path; tie-break by earliest along the segment.
-                if (dist < bestDist - 0.001 || (Math.abs(dist - bestDist) <= 0.001 && t < bestT)) {
-                    bestDist = dist;
-                    bestT = t;
-                    bestItem = item;
+                if (dist <= r) {
+                    const globalT = u0 + (u1 - u0) * t;
+                    if (
+                        globalT < bestGlobalT - 1e-6 ||
+                        (Math.abs(globalT - bestGlobalT) <= 1e-6 && dist < bestDist - 0.001)
+                    ) {
+                        bestDist = dist;
+                        bestGlobalT = globalT;
+                        bestItem = item;
+                    }
                 }
             }
         }
