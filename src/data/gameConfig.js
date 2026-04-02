@@ -171,6 +171,21 @@ export const GAME_CONFIG = {
     },
 
     encounters: {
+        // Ground road obstacles (hole / cone / barricade): no spawn until the doll is rolling on the road;
+        // each spawn roll can be one of the variants or nothing (clear lane → easier win).
+        roadObstacleStream: {
+            minRollSpeedX: 24,
+            gapMin: 760,
+            gapMax: 1700,
+            firstGapAfterRollMin: 480,
+            firstGapAfterRollMax: 1040,
+            spawnWeights: {
+                nothing: 34,
+                hole: 20,
+                trafficcone: 28,
+                roadblocker: 18
+            }
+        },
         hazardRules: {
             tree: { severity: "major", multiplierPenalty: 0, bounceImpulseX: -220, bounceImpulseY: -280 },
             lamp_post: { severity: "major", multiplierPenalty: 0, bounceImpulseX: -200, bounceImpulseY: -260 },
@@ -196,8 +211,7 @@ export const GAME_CONFIG = {
                 items: [
                     { type: "pickup", x: 520, yOffset: -120, label: "x2" },
                     { type: "bomb", x: 880, yOffset: -140, label: "÷2" },
-                    { type: "hazard", x: 1220, yOffset: 0, label: "POLE", variant: "pole" },
-                    { type: "hazard", x: 1540, yOffset: 0, label: "HOLE", variant: "hole" }
+                    { type: "hazard", x: 1220, yOffset: 0, label: "POLE", variant: "pole" }
                 ]
             },
             {
@@ -206,7 +220,6 @@ export const GAME_CONFIG = {
                 items: [
                     { type: "pickup", x: 560, yOffset: -180, label: "x2" },
                     { type: "pickup", x: 900, yOffset: -150, label: "+1" },
-                    { type: "hazard", x: 1560, yOffset: 0, label: "HOLE", variant: "hole" },
                     { type: "hazard", x: 1900, yOffset: 0, label: "WATER", variant: "water" }
                 ]
             },
@@ -236,8 +249,7 @@ export const GAME_CONFIG = {
                 weight: 10,
                 items: [
                     { type: "pickup", x: 1240, yOffset: -130, label: "x2" },
-                    { type: "hazard", x: 1640, yOffset: 0, label: "WATER", variant: "water" },
-                    { type: "hazard", x: 2000, yOffset: 0, label: "HOLE", variant: "hole" }
+                    { type: "hazard", x: 1640, yOffset: 0, label: "WATER", variant: "water" }
                 ]
             }
         ]

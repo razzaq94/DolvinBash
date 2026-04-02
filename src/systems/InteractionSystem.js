@@ -29,7 +29,8 @@ export default class InteractionSystem {
         this.speedTuning = GAME_CONFIG.speedModes?.[this.speedMode] || GAME_CONFIG.speedModes?.NORMAL || {};
         this.volatilityTuning = GAME_CONFIG.volatilityModes?.[this.volatility] || GAME_CONFIG.volatilityModes?.NORMAL || {};
         this.maxMultiplier = 999;
-        this.nextHazardSpawnX = 2500; 
+        this.nextHazardSpawnX = 1e9;
+        this.roadObstacleStreamUnlocked = false;
         this.decorationHazards = []; // Pool for scenery-based hazards
         this.proceduralBombs = [];
         this.nextBombSpawnX = 900;
@@ -104,6 +105,7 @@ export default class InteractionSystem {
                     yOffset,
                     itemData.variant
                 );
+                item.deferredUntilRolling = true;
                 this.hazards.push(item);
             } else if (itemData.type === "bat") {
                 item = this.createRectObject(
@@ -618,8 +620,8 @@ export default class InteractionSystem {
 
     spawnEnvironmentDecoration(groundY) {
         // Decorative sidewalk hazards were merged into the background (no longer spawned).
-        // We still need a pool to procedurally spawn *road colliders* (hole/cone/blocker).
-        this.nextHazardSpawnX = 2500;
+        // Pool for procedural road colliders; stream starts only after the doll rolls (maintainHazardStream).
+        this.nextHazardSpawnX = 1e9;
 
         if (!this.decorationHazards.length) {
             this.decorationHazards = [];
@@ -639,6 +641,8 @@ export default class InteractionSystem {
                 );
                 item.active = false;
                 item.hasCollided = false;
+                item.deferredUntilRolling = false;
+                item.isProceduralRoadPool = true;
                 item.shape.setVisible(false);
                 item.text.setVisible(false);
                 this.decorationHazards.push(item);
@@ -684,6 +688,63 @@ export default class InteractionSystem {
 
         this.emitMultiplierChanged();
         this.emitComboChanged();
+
+        this.roadObstacleStreamUnlocked = false;
+        this.deactivateRoadCollidersUntilRolling();
+    }
+
+    isRoadColliderVariant(variant) {
+        const v = String(variant || "").toLowerCase();
+        return v === "hole" || v === "trafficcone" || v === "roadblocker";
+    }
+
+    deactivateRoadCollidersUntilRolling() {
+        for (let i = 0; i < this.hazards.length; i++) {
+            const item = this.hazards[i];
+            if (!this.isRoadColliderVariant(item.variant)) {
+                continue;
+            }
+            item.active = false;
+            item.hasCollided = false;
+            item.shape?.setVisible(false);
+            item.text?.setVisible(false);
+        }
+    }
+
+    activateDeferredPatternRoadHazards() {
+        for (let i = 0; i < this.hazards.length; i++) {
+            const item = this.hazards[i];
+            if (!item.deferredUntilRolling || !this.isRoadColliderVariant(item.variant)) {
+                continue;
+            }
+            item.active = true;
+            item.shape?.setVisible(true);
+        }
+    }
+
+    pickRoadObstacleSpawnKind() {
+        const cfg = GAME_CONFIG.encounters?.roadObstacleStream?.spawnWeights || {};
+        const entries = [
+            ["nothing", Math.max(0, Number(cfg.nothing) || 0)],
+            ["hole", Math.max(0, Number(cfg.hole) || 0)],
+            ["trafficcone", Math.max(0, Number(cfg.trafficcone) || 0)],
+            ["roadblocker", Math.max(0, Number(cfg.roadblocker) || 0)]
+        ];
+        let total = 0;
+        for (let i = 0; i < entries.length; i++) {
+            total += entries[i][1];
+        }
+        if (total <= 0) {
+            return "nothing";
+        }
+        let roll = Phaser.Math.Between(1, total);
+        for (let i = 0; i < entries.length; i++) {
+            roll -= entries[i][1];
+            if (roll <= 0) {
+                return entries[i][0];
+            }
+        }
+        return "nothing";
     }
 
     setRoundTuning({ speedMode = "NORMAL", volatility = "NORMAL" } = {}) {
@@ -1235,13 +1296,23 @@ export default class InteractionSystem {
     }
 
     maintainHazardStream(dollX) {
-        // Requirement: don't spawn ground obstacles until the doll is actually rolling on the ground.
+        const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
         const groundY = this.getGroundY();
         const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isOnGround = (this.dollController?.position?.y ?? 0) >= (collisionThreshold - 1);
-        const isRolling = isOnGround && Math.abs(this.dollController?.velocity?.x ?? 0) > 60;
+        const vx = Math.abs(this.dollController?.velocity?.x ?? 0);
+        const minRoll = streamCfg.minRollSpeedX ?? 24;
+        const isRolling = isOnGround && vx > minRoll;
         if (!isRolling) {
             return;
+        }
+
+        if (!this.roadObstacleStreamUnlocked) {
+            this.roadObstacleStreamUnlocked = true;
+            this.activateDeferredPatternRoadHazards();
+            const gmin = streamCfg.firstGapAfterRollMin ?? 480;
+            const gmax = streamCfg.firstGapAfterRollMax ?? 1040;
+            this.nextHazardSpawnX = dollX + Phaser.Math.Between(gmin, gmax);
         }
 
         const camera = this.scene.cameras.main;
@@ -1259,16 +1330,14 @@ export default class InteractionSystem {
             }
         }
 
-        // 2. Procedural Spawning (random): sometimes spawn nothing.
-        // Trigger by distance travelled, but *position* the obstacle on the right side of the viewport.
-        if (dollX < this.nextHazardSpawnX) return;
+        // 2. Procedural spawn tick: weighted hole / cone / barricade / nothing (clear lane).
+        if (dollX < this.nextHazardSpawnX) {
+            return;
+        }
 
-        // Chance to spawn an obstacle this time (otherwise "nothing" spawns).
-        const spawnChance = 0.92;
-        const shouldSpawn = Math.random() < spawnChance;
+        const kind = this.pickRoadObstacleSpawnKind();
 
-        if (shouldSpawn) {
-            // Find an inactive item from the pool
+        if (kind !== "nothing") {
             let candidate = null;
             for (let i = 0; i < this.decorationHazards.length; i++) {
                 if (!this.decorationHazards[i].active) {
@@ -1277,7 +1346,6 @@ export default class InteractionSystem {
                 }
             }
 
-            // If no inactive item, pick the furthest behind (absolute recycle)
             if (!candidate) {
                 for (let i = 0; i < this.decorationHazards.length; i++) {
                     const item = this.decorationHazards[i];
@@ -1289,33 +1357,18 @@ export default class InteractionSystem {
 
             if (candidate) {
                 const viewW = Math.max(1, this.scene.scale.width);
-                // Spawn only at the right corner.
                 const rightCornerX = cameraRight - Math.round(viewW * 0.08);
                 const spawnX = Math.max(dollX + 240, rightCornerX);
-                this.placeHazardProcedural(candidate, spawnX);
+                this.placeHazardProcedural(candidate, spawnX, kind);
             }
         }
 
-        // Next trigger distance: random gaps so it doesn't feel patterned.
-        this.nextHazardSpawnX = dollX + Phaser.Math.Between(820, 1650);
+        const gapMin = streamCfg.gapMin ?? 760;
+        const gapMax = streamCfg.gapMax ?? 1700;
+        this.nextHazardSpawnX = dollX + Phaser.Math.Between(gapMin, gapMax);
     }
 
-    placeHazardProcedural(item, x) {
-        // NOTE: Cats removed from the game.
-        // Road colliders: trafficcone/roadblocker/hole.
-        const variants = ["trafficcone", "roadblocker", "hole"];
-        const weights = [45, 35, 20]; // 100 total (more variety)
-        let roll = Phaser.Math.Between(1, 100);
-        let variant = "trafficcone";
-        
-        for (let i = 0; i < variants.length; i++) {
-            roll -= weights[i];
-            if (roll <= 0) {
-                variant = variants[i];
-                break;
-            }
-        }
-
+    placeHazardProcedural(item, x, variant) {
         const visual = this.getHazardVisual(variant);
         const groundY = this.getGroundY();
         
@@ -2251,6 +2304,8 @@ export default class InteractionSystem {
         this.proceduralBombs.length = 0;
         this.allItems.length = 0;
         this.activePatternId = "";
+        this.roadObstacleStreamUnlocked = false;
+        this.nextHazardSpawnX = 1e9;
     }
 
     destroy() {
