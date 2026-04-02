@@ -184,6 +184,11 @@ export const GAME_CONFIG = {
             gapMax: 1700,
             firstGapAfterRollMin: 480,
             firstGapAfterRollMax: 1040,
+            // Mobile: spawn at viewport right edge. Desktop: viewport horizontal center (fairer threat on wide screens).
+            rightEdgePaddingPx: 44,
+            rightEdgePaddingRatio: 0.07,
+            desktopMidJitterPx: 20,
+            minAheadOfDollPx: 48,
             spawnWeights: {
                 nothing: 34,
                 hole: 20,

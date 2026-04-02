@@ -1298,6 +1298,29 @@ export default class InteractionSystem {
         item.active = true;
     }
 
+    /** Mobile: right edge of viewport. Desktop: horizontal middle (obstacles feel too easy at the far-right edge on PC). */
+    getRoadObstacleSpawnWorldX(dollX) {
+        const camera = this.scene.cameras.main;
+        const cameraLeft = camera?.scrollX ?? 0;
+        const viewW = Math.max(1, this.scene.scale.width);
+        const cameraRight = cameraLeft + viewW;
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout ? layout.isMobile : viewW < 900;
+        const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
+
+        if (isMobile) {
+            const padPx = streamCfg.rightEdgePaddingPx ?? 44;
+            const padRatio = streamCfg.rightEdgePaddingRatio ?? 0.07;
+            const pad = Math.max(padPx, Math.round(viewW * padRatio));
+            return cameraRight - pad;
+        }
+
+        const jitter = streamCfg.desktopMidJitterPx ?? 20;
+        const midX = cameraLeft + viewW * 0.5 + Phaser.Math.Between(-jitter, jitter);
+        const minAhead = streamCfg.minAheadOfDollPx ?? 48;
+        return Math.max(midX, dollX + minAhead);
+    }
+
     maintainHazardStream(dollX) {
         const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
         const groundY = this.getGroundY();
@@ -1320,7 +1343,6 @@ export default class InteractionSystem {
 
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
-        const cameraRight = cameraLeft + this.scene.scale.width;
         
         // 1. Despawn far-behind items
         const despawnX = cameraLeft - 400;
@@ -1359,9 +1381,7 @@ export default class InteractionSystem {
             }
 
             if (candidate) {
-                const viewW = Math.max(1, this.scene.scale.width);
-                const rightCornerX = cameraRight - Math.round(viewW * 0.08);
-                const spawnX = Math.max(dollX + 240, rightCornerX);
+                const spawnX = this.getRoadObstacleSpawnWorldX(dollX);
                 this.placeHazardProcedural(candidate, spawnX, kind);
             }
         }
