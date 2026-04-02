@@ -6,7 +6,7 @@ export default class HudPanel {
         this.comboCount = 0;
         this.comboRatio = 0;
 
-        // Keep HUD below the HTML header ("DOLVIN BASH") to avoid overlap.
+        // Keep HUD below the HTML header ("DOLWIN & BASH") to avoid overlap.
         this.text = scene.add.text(20, 72, "", {
             fontFamily: '"Bubblegum Sans", cursive',
             fontSize: "36px",

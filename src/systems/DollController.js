@@ -374,10 +374,19 @@ export default class DollController {
         }
 
         this.syncVisuals();
+    }
 
+    // Run after InteractionSystem so road hazards (hole/cone) register before we declare a win.
+    finalizeAfterHazards() {
+        if (!this.isActive || !this.doll) {
+            return;
+        }
+
+        const collisionThreshold = this.groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isAtRestOnGround = this.position.y >= collisionThreshold - 0.1;
 
         const shouldStopByVelocity =
+            !this.isFallingInHole &&
             Math.abs(this.velocity.x) <= Math.max(3.5, (GAME_CONFIG.doll.stopVelocityX * 0.22)) &&
             Math.abs(this.velocity.y) <= 1 &&
             isAtRestOnGround &&
@@ -386,7 +395,10 @@ export default class DollController {
         // Safety timeout should never end mid-air. Round must resolve after ground contact.
         const shouldStopByTime = this.elapsedMs >= GAME_CONFIG.doll.maxFlightTimeMs;
 
-        if (shouldStopByVelocity || (shouldStopByTime && isAtRestOnGround && this.groundedMs >= 1400)) {
+        if (
+            shouldStopByVelocity ||
+            (!this.isFallingInHole && shouldStopByTime && isAtRestOnGround && this.groundedMs >= 1400)
+        ) {
             this.stopMovement();
         }
 

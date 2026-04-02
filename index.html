@@ -6,7 +6,7 @@
         name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <title>Dolvin Bash</title>
+    <title>Dolwin &amp; Bash</title>
     <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -114,12 +114,12 @@
                         loaded = true;
                         break;
                     } catch (error) {
-                        console.warn("[Dolvin Bash] Phaser source failed:", phaserSources[i], error);
+                        console.warn("[Dolwin & Bash] Phaser source failed:", phaserSources[i], error);
                     }
                 }
 
                 if (!loaded || typeof window.Phaser === "undefined") {
-                    console.error("[Dolvin Bash] Unable to load Phaser from all configured sources.");
+                    console.error("[Dolwin & Bash] Unable to load Phaser from all configured sources.");
                     return;
                 }
 

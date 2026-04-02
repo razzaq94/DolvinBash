@@ -104,6 +104,12 @@ export const GAME_CONFIG = {
         ]
     },
 
+    // Softer sim on narrow mobile GPUs (e.g. jerky flight under high timeScale or frame spikes).
+    performance: {
+        mobileGameplayTimeScaleCap: 1.12,
+        mobilePhysicsDeltaCapMs: 30
+    },
+
     speedModes: {
         SLOW: {
             launchXMultiplier: 0.88,

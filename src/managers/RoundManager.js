@@ -123,6 +123,9 @@ export default class RoundManager {
             this.dollController.launch();
 
             this.dollController.onMovementComplete = () => {
+                if (this.dollController.isFallingInHole) {
+                    return;
+                }
                 // Round resolves only when the doll fully stops.
                 if (!this.hitHazard) {
                     // Apply win pose immediately after full stop.

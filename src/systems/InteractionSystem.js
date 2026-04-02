@@ -840,48 +840,67 @@ export default class InteractionSystem {
             this.consumeObject(item);
         });
 
-        // Road obstacle collisions: swept + near-ground to prevent landing misses.
-        const roadHit = this.findBestRectHitSwept(
-            this.hazards,
-            prevDollX,
-            prevDollY,
-            dollX,
-            dollY,
-            dollWRoad,
-            dollHRoad,
-            (it) => (it.variant === "hole" || it.variant === "trafficcone" || it.variant === "roadblocker")
-        );
+        // Road obstacles: swept only when moving enough this frame; otherwise swept rays false-trigger on slow roll.
+        const roadMoveSq = (dollX - prevDollX) ** 2 + (dollY - prevDollY) ** 2;
+        const roadHit =
+            roadMoveSq >= 2.25
+                ? this.findBestRectHitSwept(
+                    this.hazards,
+                    prevDollX,
+                    prevDollY,
+                    dollX,
+                    dollY,
+                    dollWRoad,
+                    dollHRoad,
+                    (it) => (it.variant === "hole" || it.variant === "trafficcone" || it.variant === "roadblocker")
+                )
+                : this.findStaticRoadOverlap(
+                    this.hazards,
+                    dollX,
+                    dollY,
+                    dollWRoad,
+                    dollHRoad,
+                    (it) => (it.variant === "hole" || it.variant === "trafficcone" || it.variant === "roadblocker")
+                );
 
         if (roadHit && !roadHit.hasCollided) {
             const item = roadHit;
             const groundY = this.getGroundY();
             const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
             const isOnGround = dollY >= (collisionThreshold - 1);
-            const nearGround = dollY >= (collisionThreshold - 28);
+            // Wider band so hole/cone/blocker never "ghost" through due to a missed ground band.
+            const nearGround = dollY >= (collisionThreshold - 72);
+            const isRollingOnRoad =
+                (isOnGround || nearGround) && Math.abs(this.dollController?.velocity?.x ?? 0) > 18;
 
-            // Mark collided first to avoid double-processing in same frame.
-            item.hasCollided = true;
+            // CRITICAL: only set hasCollided after we commit to a real hit.
+            // Old code marked collided even when skipping mid-air → pass-through + fake wins.
 
-            // Always treat these as hazards (trail red, hurt, etc.)
-            this.spawnImpactParticles("hazard", item.x, item.y);
-            this.dollController.onGameplayInteraction?.("hazard");
-            this.dollController.setTrailTheme?.("minus", 0);
-            this.resetCombo();
+            const applyRoadFatal = () => {
+                item.hasCollided = true;
+                this.spawnImpactParticles("hazard", item.x, item.y);
+                this.dollController.onGameplayInteraction?.("hazard");
+                this.dollController.setTrailTheme?.("minus", 0);
+                this.resetCombo();
+            };
 
-            // Only trigger when grounded/near-ground (prevents weird mid-air hits).
-            if (!isOnGround && !nearGround) {
-                // Let it pass; we only want road hits close to the floor.
-            } else if (item.variant === "hole") {
-                this.dollController.disableTrailsNow?.();
-                this.interactionsEnabled = false;
-                this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
-                this.onHazardHit?.(item, true);
-            } else {
-                // trafficcone / roadblocker -> instant dead/stop
-                this.interactionsEnabled = false;
-                this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
-                this.onHazardHit?.(item, true);
-                this.dollController.stopImmediatelyDead?.();
+            if (item.variant === "hole") {
+                if (isOnGround || nearGround) {
+                    applyRoadFatal();
+                    this.dollController.disableTrailsNow?.();
+                    this.interactionsEnabled = false;
+                    this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
+                    this.onHazardHit?.(item, true);
+                }
+            } else if (item.variant === "trafficcone" || item.variant === "roadblocker") {
+                // Cone / barricade: on/near ground + horizontal motion (rolling), not mid-air grazes.
+                if ((isOnGround || nearGround) && isRollingOnRoad) {
+                    applyRoadFatal();
+                    this.interactionsEnabled = false;
+                    this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
+                    this.onHazardHit?.(item, true);
+                    this.dollController.stopImmediatelyDead?.();
+                }
             }
         }
 
@@ -1938,8 +1957,8 @@ export default class InteractionSystem {
             const isWater = (item.variant === "water");
             const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
             
-            const wFactor = isHole ? 0.42 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.55 : 0.62)));
-            const hFactor = isHole ? 0.42 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.55 : 0.66)));
+            const wFactor = isHole ? 0.52 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.82 : 0.62)));
+            const hFactor = isHole ? 0.50 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.78 : 0.66)));
 
             const itemHalfW = (item.width * wFactor) * 0.5;
             const itemHalfH = (item.height * hFactor) * 0.5;
@@ -1966,6 +1985,51 @@ export default class InteractionSystem {
         }
     }
 
+    // When the doll barely moves this frame, swept ray tests can misbehave; use real overlap only.
+    findStaticRoadOverlap(items, dollX, dollY, dollHalfW, dollHalfH, filterFn = null) {
+        let best = null;
+        let bestDist = Infinity;
+
+        const dollLeft = dollX - dollHalfW;
+        const dollRight = dollX + dollHalfW;
+        const dollTop = dollY - dollHalfH;
+        const dollBottom = dollY + dollHalfH;
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item.active || item.hasCollided) continue;
+            if (filterFn && !filterFn(item)) continue;
+
+            const originY = item.shape?.originY ?? 0.5;
+            const isHole = (item.variant === "hole");
+            const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
+            const wFactor = isHole ? 0.52 : (isRoadBlock ? 0.82 : 0.62);
+            const hFactor = isHole ? 0.50 : (isRoadBlock ? 0.78 : 0.66);
+
+            const itemHalfW = (item.width * wFactor) * 0.5;
+            const itemHalfH = (item.height * hFactor) * 0.5;
+            const left = item.x - itemHalfW;
+            const right = item.x + itemHalfW;
+            const top = item.y - item.height * originY + (item.height * (1 - hFactor) * 0.5);
+            const bottom = item.y + item.height * (1 - originY) - (item.height * (1 - hFactor) * 0.5);
+
+            const overlaps =
+                dollRight >= left &&
+                dollLeft <= right &&
+                dollBottom >= top &&
+                dollTop <= bottom;
+
+            if (overlaps) {
+                const dist = Math.abs(item.x - dollX);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = item;
+                }
+            }
+        }
+        return best;
+    }
+
     // Swept AABB collision to prevent "miss" at high speed (landing/rolling into road obstacles).
     // Returns the first hit item (closest along the swept path), or null.
     findBestRectHitSwept(items, x0, y0, x1, y1, dollHalfW, dollHalfH, filterFn = null) {
@@ -1987,8 +2051,8 @@ export default class InteractionSystem {
             const isWater = (item.variant === "water");
             const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
 
-            const wFactor = isHole ? 0.42 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.55 : 0.62)));
-            const hFactor = isHole ? 0.42 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.55 : 0.66)));
+            const wFactor = isHole ? 0.52 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.82 : 0.62)));
+            const hFactor = isHole ? 0.50 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.78 : 0.66)));
 
             const itemHalfW = (item.width * wFactor) * 0.5;
             const itemHalfH = (item.height * hFactor) * 0.5;

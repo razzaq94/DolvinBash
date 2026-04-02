@@ -301,7 +301,15 @@ export default class GameScene extends Phaser.Scene {
 
     update(time, delta) {
         const timeScale = Math.max(0.5, Math.min(1.6, Number(this.gameplayTimeScale) || 1));
-        const deltaSeconds = (delta / 1000) * timeScale;
+        let deltaSeconds = (delta / 1000) * timeScale;
+        const layout = this.getViewportLayout?.() || { isMobile: false };
+        const capMs = layout.isMobile ? (GAME_CONFIG.performance?.mobilePhysicsDeltaCapMs ?? 0) : 0;
+        if (capMs > 0) {
+            const capSec = (capMs / 1000) * timeScale;
+            if (deltaSeconds > capSec) {
+                deltaSeconds = capSec;
+            }
+        }
 
         this.dollController?.update(deltaSeconds);
 
@@ -309,11 +317,18 @@ export default class GameScene extends Phaser.Scene {
             this.interactionSystem?.update(deltaSeconds);
         }
 
+        this.dollController?.finalizeAfterHazards?.();
+
         this.updateCamera(deltaSeconds);
     }
 
     setGameplayTimeScale(scale = 1) {
-        const s = Math.max(0.5, Math.min(1.6, Number(scale) || 1));
+        let s = Math.max(0.5, Math.min(1.6, Number(scale) || 1));
+        const layout = this.getViewportLayout?.() || { isMobile: false };
+        const mobileCap = GAME_CONFIG.performance?.mobileGameplayTimeScaleCap;
+        if (layout.isMobile && mobileCap != null && mobileCap > 0) {
+            s = Math.min(s, mobileCap);
+        }
         this.gameplayTimeScale = s;
         // Make tweens/timers also match the selected speed.
         if (this.time) this.time.timeScale = s;

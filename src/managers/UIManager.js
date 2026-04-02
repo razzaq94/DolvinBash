@@ -67,7 +67,7 @@ export default class UIManager {
         const header = document.createElement("div");
         header.className = "game-header";
         header.innerHTML = `
-            <div class="logo-text">DOLVIN BASH</div>
+            <div class="logo-text">DOLWIN &amp; BASH</div>
         `;
         this.root.prepend(header);
     }
