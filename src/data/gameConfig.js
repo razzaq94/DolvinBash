@@ -138,6 +138,20 @@ export const GAME_CONFIG = {
         ]
     },
 
+    // Procedural bombs in the sky lane: desktop-only denser gaps + wider pre-fill so replay matches multiplier density.
+    proceduralBombStream: {
+        gapMin: 120,
+        gapMax: 220,
+        unablePlaceGapMin: 140,
+        unablePlaceGapMax: 220,
+        fillAheadPx: 2200,
+        gapMinDesktop: 76,
+        gapMaxDesktop: 138,
+        unablePlaceGapMinDesktop: 82,
+        unablePlaceGapMaxDesktop: 150,
+        fillAheadPxDesktop: 3400
+    },
+
     // Softer sim on narrow mobile GPUs (e.g. jerky flight under high timeScale or frame spikes).
     performance: {
         mobileGameplayTimeScaleCap: 1.12,
@@ -201,7 +215,33 @@ export const GAME_CONFIG = {
         impulseX: 420,
         impulseY: -720,
         diveVelocityY: 980,
-        diveVelocityX: 260
+        diveVelocityX: 260,
+        displayWidth: 120,
+        displayHeight: 82,
+        // Procedural stream: slightly larger than bomb cap (radius 20 * 2.25 = 45) for readability.
+        streamTargetMaxPx: 54,
+        stream: {
+            poolCount: 90,
+            gapMin: 120,
+            gapMax: 220,
+            gapMinDesktop: 76,
+            gapMaxDesktop: 138,
+            unablePlaceGapMin: 140,
+            unablePlaceGapMax: 220,
+            unablePlaceGapMinDesktop: 82,
+            unablePlaceGapMaxDesktop: 150,
+            fillAheadPx: 2200,
+            fillAheadPxDesktop: 3400,
+            xJitterMin: -40,
+            xJitterMax: 60,
+            // Start slightly ahead of bomb stream so bats and bombs interleave, not stack.
+            spawnPhaseOffsetX: 180
+        },
+        wingFrameMs: 128,
+        wingTextureUp: "bat_wing_up",
+        wingTextureMid: "bat_wing_mid",
+        wingTextureDown: "bat_wing_down",
+        hitbox: { wFactor: 0.5, hFactor: 0.52 }
     },
 
     encounters: {

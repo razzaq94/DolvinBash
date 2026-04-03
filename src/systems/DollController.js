@@ -992,7 +992,8 @@ export default class DollController {
         }
 
         if (type === "bat") {
-            this.setExpression("panic");
+            // Same face as bomb hit (angry / frustrated), no multiplier math on bat.
+            this.setExpression("frustrated");
             this.playImpactFeedback();
             return;
         }

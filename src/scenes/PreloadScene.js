@@ -56,6 +56,9 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.image("hazard_pole", "assets/obstacles/water poles.png"); // Using hydrant as pole
         this.load.image("hazard_water_2", "assets/obstacles/water pools 2.png");
         this.load.image("hazard_bomb", "assets/obstacles/bomb.png");
+        this.load.image("bat_wing_up", "assets/obstacles/wingsup.png");
+        this.load.image("bat_wing_mid", "assets/obstacles/wingsmiddle.png");
+        this.load.image("bat_wing_down", "assets/obstacles/wingsdown.png");
         this.load.image("hazard_trafficcone", "assets/obstacles/trafficcone.png");
         this.load.image("hazard_roadblocker", "assets/obstacles/roadblocker.png");
 

@@ -34,6 +34,8 @@ export default class InteractionSystem {
         this.decorationHazards = []; // Pool for scenery-based hazards
         this.proceduralBombs = [];
         this.nextBombSpawnX = 900;
+        this.proceduralBats = [];
+        this.nextBatSpawnX = 900;
         this.prevDollX = null;
         this.prevDollY = null;
     }
@@ -108,21 +110,7 @@ export default class InteractionSystem {
                 item.deferredUntilRolling = true;
                 this.hazards.push(item);
             } else if (itemData.type === "bat") {
-                item = this.createRectObject(
-                    x,
-                    y,
-                    100,
-                    40,
-                    0x3b82f6,
-                    itemData.label || "HIT",
-                    "bat",
-                    yOffset
-                );
-
-                item.impulseX = itemData.impulseX ?? GAME_CONFIG.bat.impulseX;
-                item.impulseY = itemData.impulseY ?? GAME_CONFIG.bat.impulseY;
-
-                item.variant = "bat";
+                item = this.createBatObject(x, y, yOffset, itemData);
                 this.bats.push(item);
             }
 
@@ -138,6 +126,7 @@ export default class InteractionSystem {
         this.spawnSkyMultipliers(groundY);
         this.spawnEnvironmentDecoration(groundY);
         this.initBombStream(groundY);
+        this.initBatStream(groundY);
         this.spawnStarterPickup();
         this.reset();
     }
@@ -170,8 +159,36 @@ export default class InteractionSystem {
         const camera = this.scene.cameras.main;
         const cameraRight = (camera?.scrollX ?? 0) + this.scene.scale.width;
         const skyStartX = GAME_CONFIG.skyMultipliers?.startX ?? 520;
-        // Start bombs earlier and keep stream dense.
-        this.nextBombSpawnX = Math.max(this.nextBombSpawnX, skyStartX + 120, cameraRight + 260);
+        // Always anchor to the *current* camera (do not Math.max with stale world X after replay).
+        this.nextBombSpawnX = Math.max(skyStartX + 120, cameraRight + 260);
+    }
+
+    initBatStream(groundY) {
+        const batCfg = GAME_CONFIG.bat || {};
+        const sc = batCfg.stream || {};
+        const poolCount = sc.poolCount ?? 90;
+
+        if (!this.proceduralBats.length) {
+            for (let i = 0; i < poolCount; i++) {
+                const item = this.createBatObject(
+                    -600,
+                    groundY - 220,
+                    -220,
+                    { proceduralPool: true, label: "" }
+                );
+                item.active = false;
+                item.hasCollided = false;
+                item.shape.setVisible(false);
+                item.text.setVisible(false);
+                this.proceduralBats.push(item);
+                this.bats.push(item);
+                this.allItems.push(item);
+            }
+        }
+
+        const phase = sc.spawnPhaseOffsetX ?? 180;
+        // Phase-shift from bomb cursor (already reset in initBombStream for this pattern).
+        this.nextBatSpawnX = this.nextBombSpawnX + phase;
     }
 
     spawnStarterPickup() {
@@ -455,6 +472,89 @@ export default class InteractionSystem {
             text,
             active: true
         };
+    }
+
+    createBatObject(x, y, yOffset, itemData = {}) {
+        const batCfg = GAME_CONFIG.bat || {};
+        const proceduralPool = !!itemData.proceduralPool;
+        const streamMax = batCfg.streamTargetMaxPx;
+        const tw = proceduralPool && typeof streamMax === "number"
+            ? streamMax
+            : (batCfg.displayWidth ?? 112);
+        const th = proceduralPool && typeof streamMax === "number"
+            ? streamMax
+            : (batCfg.displayHeight ?? 76);
+        const keys = [
+            batCfg.wingTextureUp || "bat_wing_up",
+            batCfg.wingTextureMid || "bat_wing_mid",
+            batCfg.wingTextureDown || "bat_wing_down"
+        ];
+
+        const text = this.scene.add.text(x, y, itemData?.label || "", {
+            fontFamily: '"Bubblegum Sans", cursive',
+            fontSize: "42px",
+            color: "#ffffff"
+        }).setOrigin(0.5).setDepth(36).setVisible(false);
+
+        let shape;
+        let batBaseScale = 1;
+        if (this.scene.textures.exists(keys[0])) {
+            shape = this.scene.add.image(x, y, keys[0]).setOrigin(0.5, 0.5).setDepth(35);
+            batBaseScale = Math.min(tw / shape.width, th / shape.height);
+            shape.setScale(batBaseScale);
+        } else {
+            shape = this.scene.add.rectangle(x, y, tw, th, 0x6b21a8).setStrokeStyle(2, 0x312e81).setDepth(35);
+        }
+
+        shape.setScrollFactor(1, 1);
+        text.setScrollFactor(1, 1);
+
+        return {
+            type: "bat",
+            x,
+            y,
+            yOffset,
+            width: tw,
+            height: th,
+            variant: "bat",
+            shape,
+            text,
+            active: true,
+            batTextures: keys,
+            batAnimMs: Phaser.Math.Between(0, 400),
+            batFrameIndex: 0,
+            batBaseScale,
+            hasCollided: false,
+            isProceduralBat: proceduralPool
+        };
+    }
+
+    updateBatWingAnimations(deltaSeconds) {
+        const batCfg = GAME_CONFIG.bat || {};
+        const frameMs = Math.max(40, batCfg.wingFrameMs ?? 128);
+        for (let i = 0; i < this.bats.length; i++) {
+            const item = this.bats[i];
+            if (!item?.active || !item.batTextures?.length || !item.shape?.setTexture) {
+                continue;
+            }
+            if (!this.scene.textures.exists(item.batTextures[0])) {
+                continue;
+            }
+            item.batAnimMs = (item.batAnimMs ?? 0) + deltaSeconds * 1000;
+            const frame = Math.floor(item.batAnimMs / frameMs) % 3;
+            if (frame === item.batFrameIndex) {
+                continue;
+            }
+            item.batFrameIndex = frame;
+            const key = item.batTextures[frame];
+            if (this.scene.textures.exists(key)) {
+                item.shape.setTexture(key);
+                const bs = item.batBaseScale ?? 1;
+                if (bs !== 1) {
+                    item.shape.setScale(bs);
+                }
+            }
+        }
     }
 
     getHazardVisual(variant) {
@@ -768,6 +868,8 @@ export default class InteractionSystem {
             return;
         }
 
+        this.updateBatWingAnimations(deltaSeconds);
+
         const dollX = this.dollController.position.x;
         const dollY = this.dollController.position.y;
         const prevDollX = (this.prevDollX ?? dollX);
@@ -775,6 +877,7 @@ export default class InteractionSystem {
         this.maintainSkyMultiplierStream(dollX);
         this.maintainHazardStream(dollX);
         this.maintainBombStream(dollX);
+        this.maintainBatStream(dollX);
         this.updateComboTimer(deltaSeconds);
 
         const dollCircleRadius = this.getDollCircleRadius();
@@ -784,6 +887,9 @@ export default class InteractionSystem {
         const groundY = this.getGroundY();
         const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isOnGroundNow = dollY >= (collisionThreshold - 1);
+
+        const dollWTorso = (this.dollController.doll?.displayWidth || 120) * 0.30;
+        const dollHTorso = (this.dollController.doll?.displayHeight || 120) * 0.36;
 
         // Resolve circle collisions using swept "best hit" to avoid wrong/missed hits
         // when multiple nodes are close together.
@@ -882,36 +988,44 @@ export default class InteractionSystem {
                 this.dollController.updateScoreValue?.(this.multiplier);
             }
             });
+
+            // Bats: same knockback as bomb, no multiplier / ÷2 / floating number effects; wing animation is visual only.
+            const batMoveSq = (dollX - prevDollX) ** 2 + (dollY - prevDollY) ** 2;
+            const batHit =
+                batMoveSq >= 2.25
+                    ? this.findBestRectHitSwept(
+                        this.bats,
+                        prevDollX,
+                        prevDollY,
+                        dollX,
+                        dollY,
+                        dollWTorso,
+                        dollHTorso,
+                        null
+                    )
+                    : this.findStaticRoadOverlap(this.bats, dollX, dollY, dollWTorso, dollHTorso, null);
+            if (batHit && !batHit.hasCollided) {
+                batHit.hasCollided = true;
+                this.resetCombo();
+                this.consumeObject(batHit);
+                this.popObject(batHit.shape, batHit.text, 0xa855f7);
+                this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
+                this.spawnImpactParticles("bat", dollX, dollY);
+                this.applyRandomCollisionImpulse("hazard");
+                this.dollController.onGameplayInteraction?.("bomb");
+                this.dollController.setTrailTheme?.("minus", 0);
+            }
         }
 
 
 
         // Professional collision core:
-        // - bats: tighter torso
         // - road obstacles: doll + obstacle factors from GAME_CONFIG.roadObstacleColliders
-        const dollWTorso = (this.dollController.doll?.displayWidth || 120) * 0.30;
-        const dollHTorso = (this.dollController.doll?.displayHeight || 120) * 0.36;
         const rc = GAME_CONFIG.roadObstacleColliders || {};
         const dw = this.dollController.doll?.displayWidth || 120;
         const dh = this.dollController.doll?.displayHeight || 120;
         const dollWRoad = dw * (rc.dollHalfWidthFactor ?? 0.32);
         const dollHRoad = dh * (rc.dollHalfHeightFactor ?? 0.38);
-
-        // Bat interactions (rect collision)
-        this.checkRectCollisions(this.bats, dollX, dollY, dollWTorso, dollHTorso, (item) => {
-            if (item.hasCollided) return;
-            item.hasCollided = true;
-
-            this.spawnImpactParticles("bat", dollX, dollY);
-            this.scene.audioManager?.play("sfx_hazard", { volume: 0.5 });
-
-            const dir = (this.dollController.velocity.x ?? 1) >= 0 ? 1 : -1;
-            this.dollController.forceDiveDown?.(dir);
-            this.dollController.onGameplayInteraction?.("bat");
-            this.dollController.setTrailTheme?.("minus", 0);
-
-            this.consumeObject(item);
-        });
 
         // Road obstacles: swept only when moving enough this frame; otherwise swept rays false-trigger on slow roll.
         const roadMoveSq = (dollX - prevDollX) ** 2 + (dollY - prevDollY) ** 2;
@@ -1067,9 +1181,44 @@ export default class InteractionSystem {
         this.prevDollY = dollY;
     }
 
+    isDesktopProceduralAirThreat() {
+        const layout = this.scene.getViewportLayout?.();
+        return !(layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900);
+    }
+
+    getBombStreamTuning() {
+        const cfg = GAME_CONFIG.proceduralBombStream || {};
+        const pc = this.isDesktopProceduralAirThreat();
+        return {
+            gapMin: pc ? (cfg.gapMinDesktop ?? cfg.gapMin ?? 120) : (cfg.gapMin ?? 120),
+            gapMax: pc ? (cfg.gapMaxDesktop ?? cfg.gapMax ?? 220) : (cfg.gapMax ?? 220),
+            failMin: pc ? (cfg.unablePlaceGapMinDesktop ?? cfg.unablePlaceGapMin ?? 140) : (cfg.unablePlaceGapMin ?? 140),
+            failMax: pc ? (cfg.unablePlaceGapMaxDesktop ?? cfg.unablePlaceGapMax ?? 220) : (cfg.unablePlaceGapMax ?? 220),
+            fillAhead: pc ? (cfg.fillAheadPxDesktop ?? cfg.fillAheadPx ?? 2200) : (cfg.fillAheadPx ?? 2200)
+        };
+    }
+
+    getBatStreamTuning() {
+        const sc = GAME_CONFIG.bat?.stream || {};
+        const bombCfg = GAME_CONFIG.proceduralBombStream || {};
+        const pc = this.isDesktopProceduralAirThreat();
+        return {
+            gapMin: pc ? (sc.gapMinDesktop ?? bombCfg.gapMinDesktop ?? sc.gapMin ?? 120) : (sc.gapMin ?? 120),
+            gapMax: pc ? (sc.gapMaxDesktop ?? bombCfg.gapMaxDesktop ?? sc.gapMax ?? 220) : (sc.gapMax ?? 220),
+            failMin: pc ? (sc.unablePlaceGapMinDesktop ?? bombCfg.unablePlaceGapMinDesktop ?? 140)
+                : (sc.unablePlaceGapMin ?? 140),
+            failMax: pc ? (sc.unablePlaceGapMaxDesktop ?? bombCfg.unablePlaceGapMaxDesktop ?? 220)
+                : (sc.unablePlaceGapMax ?? 220),
+            fillAhead: pc ? (sc.fillAheadPxDesktop ?? bombCfg.fillAheadPxDesktop ?? 2200) : (sc.fillAheadPx ?? 2200),
+            jx0: sc.xJitterMin ?? -40,
+            jx1: sc.xJitterMax ?? 60
+        };
+    }
+
     maintainBombStream(dollX = 0) {
         if (!this.proceduralBombs.length) return;
 
+        const bt = this.getBombStreamTuning();
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
         const cameraRight = cameraLeft + this.scene.scale.width;
@@ -1088,7 +1237,7 @@ export default class InteractionSystem {
         }
 
         // Spawn ahead in the same sky lane as multipliers
-        const spawnLimitX = cameraRight + 2200;
+        const spawnLimitX = cameraRight + bt.fillAhead;
         const groundY = this.getGroundY();
         const skyCfg = GAME_CONFIG.skyMultipliers || {};
         const minYOffset = skyCfg.minYOffset ?? -450;
@@ -1130,7 +1279,7 @@ export default class InteractionSystem {
 
                 if (!placed) {
                     // Skip this slot to avoid overlapping with numbers.
-                    this.nextBombSpawnX += Phaser.Math.Between(140, 220);
+                    this.nextBombSpawnX += Phaser.Math.Between(bt.failMin, bt.failMax);
                     continue;
                 }
 
@@ -1155,7 +1304,98 @@ export default class InteractionSystem {
             }
 
             // Higher quantity throughout the game: smaller gaps.
-            this.nextBombSpawnX += Phaser.Math.Between(120, 220);
+            this.nextBombSpawnX += Phaser.Math.Between(bt.gapMin, bt.gapMax);
+        }
+    }
+
+    maintainBatStream(dollX = 0) {
+        if (!this.proceduralBats.length) return;
+
+        const bt = this.getBatStreamTuning();
+        const jx0 = bt.jx0;
+        const jx1 = bt.jx1;
+
+        const camera = this.scene.cameras.main;
+        const cameraLeft = camera?.scrollX ?? 0;
+        const cameraRight = cameraLeft + this.scene.scale.width;
+
+        const despawnX = cameraLeft - 420;
+        for (let i = 0; i < this.proceduralBats.length; i++) {
+            const item = this.proceduralBats[i];
+            if (item.active && item.x < despawnX) {
+                item.active = false;
+                item.shape.setVisible(false);
+                item.text.setVisible(false);
+            }
+        }
+
+        const spawnLimitX = cameraRight + bt.fillAhead;
+        const groundY = this.getGroundY();
+        const skyCfg = GAME_CONFIG.skyMultipliers || {};
+        const minYOffset = skyCfg.minYOffset ?? -450;
+        const maxYOffset = skyCfg.maxYOffset ?? -180;
+
+        while (this.nextBatSpawnX < spawnLimitX) {
+            let candidate = null;
+            for (let i = 0; i < this.proceduralBats.length; i++) {
+                if (!this.proceduralBats[i].active) {
+                    candidate = this.proceduralBats[i];
+                    break;
+                }
+            }
+
+            if (!candidate) {
+                for (let i = 0; i < this.proceduralBats.length; i++) {
+                    const item = this.proceduralBats[i];
+                    if (!candidate || item.x < candidate.x) candidate = item;
+                }
+            }
+
+            if (candidate) {
+                let placed = false;
+                let x = 0;
+                let y = 0;
+                let yOffset = 0;
+
+                for (let attempt = 0; attempt < 6; attempt++) {
+                    yOffset = Phaser.Math.Between(minYOffset, maxYOffset);
+                    x = this.nextBatSpawnX + Phaser.Math.Between(jx0, jx1);
+                    y = groundY + yOffset;
+
+                    if (this.isBombSpotClear(x, y, 130)) {
+                        placed = true;
+                        break;
+                    }
+                }
+
+                if (!placed) {
+                    this.nextBatSpawnX += Phaser.Math.Between(bt.failMin, bt.failMax);
+                    continue;
+                }
+
+                candidate.x = x;
+                candidate.y = y;
+                candidate.yOffset = yOffset;
+                candidate.active = true;
+                candidate.hasCollided = false;
+                candidate.batAnimMs = Phaser.Math.Between(0, 400);
+                candidate.batFrameIndex = 0;
+
+                const keys = candidate.batTextures || [];
+                if (candidate.shape?.setTexture && keys[0] && this.scene.textures.exists(keys[0])) {
+                    candidate.shape.setTexture(keys[0]);
+                    const bs = candidate.batBaseScale ?? 1;
+                    candidate.shape.setScale(bs);
+                }
+
+                candidate.shape.setPosition(x, y);
+                candidate.text.setPosition(x, y);
+
+                candidate.shape.setVisible(true);
+                candidate.text.setVisible(false);
+            }
+
+            this.nextBatSpawnX += Phaser.Math.Between(bt.gapMin, bt.gapMax);
         }
     }
 
@@ -2081,7 +2321,7 @@ export default class InteractionSystem {
 
     isBombSpotClear(x, y, minDist = 120) {
         const minDistSq = minDist * minDist;
-        const checkLists = [this.skyMultipliers, this.pickups, this.bombs];
+        const checkLists = [this.skyMultipliers, this.pickups, this.bombs, this.bats];
 
         for (let l = 0; l < checkLists.length; l++) {
             const items = checkLists[l];
@@ -2101,6 +2341,14 @@ export default class InteractionSystem {
     }
 
     getObstacleRectFactors(item) {
+        if (item.type === "bat" || item.variant === "bat") {
+            const hb = GAME_CONFIG.bat?.hitbox || {};
+            return {
+                wFactor: typeof hb.wFactor === "number" ? hb.wFactor : 0.5,
+                hFactor: typeof hb.hFactor === "number" ? hb.hFactor : 0.52
+            };
+        }
+
         const v = item.variant;
         const rc = GAME_CONFIG.roadObstacleColliders;
         const roadCfg = rc?.[v];
@@ -2290,7 +2538,13 @@ export default class InteractionSystem {
             item.text.setVisible(isActive && item.type !== "bomb" && item.type !== "hazard" && item.type !== "bat");
             item.sprite?.setVisible(isActive && item.type === "bomb");
 
-            item.shape.setScale(item.type === "hazard" ? item.shape.scale : 1);
+            if (item.type === "hazard") {
+                item.shape.setScale(item.shape.scale);
+            } else if (item.type === "bat" && item.batBaseScale != null) {
+                item.shape.setScale(item.batBaseScale);
+            } else {
+                item.shape.setScale(1);
+            }
             item.text.setScale(1);
             item.shape.setAlpha(1);
             item.text.setAlpha(1);
@@ -2408,10 +2662,13 @@ export default class InteractionSystem {
         this.skyMultipliers.length = 0;
         this.decorationHazards.length = 0;
         this.proceduralBombs.length = 0;
+        this.proceduralBats.length = 0;
         this.allItems.length = 0;
         this.activePatternId = "";
         this.roadObstacleStreamUnlocked = false;
         this.nextHazardSpawnX = 1e9;
+        this.nextBombSpawnX = 900;
+        this.nextBatSpawnX = 900;
     }
 
     destroy() {
