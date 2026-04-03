@@ -121,6 +121,14 @@ export const GAME_CONFIG = {
         // Minimum padding between sky numbers and bats/bombs (AABB separation; strict no overlap).
         strictAirThreatGap: 22,
         pickupHitScale: 0.82,
+        // Mobile: thora thora forgiving colliders for numbers.
+        mobileCircleHitTweak: {
+            enabled: true,
+            skyHitMul: 1.08,
+            pickupHitMul: 1.1,
+            bombHitMul: 1.06,
+            dollRadiusAdd: 0.9
+        },
         // PC (wide / ENVELOP): slightly larger circle hits than mobile — “thora thora” only.
         desktopCircleHitTweak: {
             enabled: true,

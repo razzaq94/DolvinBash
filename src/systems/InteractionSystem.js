@@ -2270,6 +2270,33 @@ export default class InteractionSystem {
         return (this.scene.scale?.width ?? 0) >= 900;
     }
 
+    isMobilePlayLayout() {
+        return !this.isDesktopPlayLayout();
+    }
+
+    applyMobileCircleHitTweak(item, r) {
+        const raw = Number(r) || 0;
+        if (raw <= 0) {
+            return raw;
+        }
+        const t = GAME_CONFIG.skyMultipliers?.mobileCircleHitTweak;
+        if (!t?.enabled || !this.isMobilePlayLayout()) {
+            return raw;
+        }
+        const ty = item?.type;
+        let mul = 1;
+        if (ty === "sky_multiplier") {
+            mul = t.skyHitMul ?? 1;
+        } else if (ty === "pickup") {
+            mul = t.pickupHitMul ?? 1;
+        } else if (ty === "bomb") {
+            mul = t.bombHitMul ?? 1;
+        } else {
+            return raw;
+        }
+        return raw * Math.max(1, mul);
+    }
+
     applyDesktopCircleHitTweak(item, r) {
         const raw = Number(r) || 0;
         if (raw <= 0) {
@@ -2299,6 +2326,13 @@ export default class InteractionSystem {
         const h = doll?.displayHeight || 120;
         // Slightly forgiving vs strict mode, still smaller than the full sprite.
         let r = Math.max(13, Math.min(22, Math.min(w, h) * 0.145));
+        const mt = GAME_CONFIG.skyMultipliers?.mobileCircleHitTweak;
+        if (mt?.enabled && this.isMobilePlayLayout()) {
+            const add = Number(mt.dollRadiusAdd) || 0;
+            if (add > 0) {
+                r = Math.min(24, r + add);
+            }
+        }
         const t = GAME_CONFIG.skyMultipliers?.desktopCircleHitTweak;
         if (t?.enabled && this.isDesktopPlayLayout()) {
             const add = Number(t.dollRadiusAdd) || 0;
@@ -2326,7 +2360,8 @@ export default class InteractionSystem {
                 r = Math.max(0, item?.radius ?? 0);
             }
         }
-        return this.applyDesktopCircleHitTweak(item, r);
+        const mobileTweaked = this.applyMobileCircleHitTweak(item, r);
+        return this.applyDesktopCircleHitTweak(item, mobileTweaked);
     }
 
     addCombo() {
