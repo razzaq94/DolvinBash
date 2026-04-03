@@ -1869,29 +1869,71 @@ export default class InteractionSystem {
         return Phaser.Math.Clamp(rounded, 1, this.maxMultiplier);
     }
 
+    isDesktopPlayLayout() {
+        const layout = this.scene.getViewportLayout?.();
+        if (layout) {
+            return !layout.isMobile;
+        }
+        return (this.scene.scale?.width ?? 0) >= 900;
+    }
+
+    applyDesktopCircleHitTweak(item, r) {
+        const raw = Number(r) || 0;
+        if (raw <= 0) {
+            return raw;
+        }
+        const t = GAME_CONFIG.skyMultipliers?.desktopCircleHitTweak;
+        if (!t?.enabled || !this.isDesktopPlayLayout()) {
+            return raw;
+        }
+        const ty = item?.type;
+        let mul = 1;
+        if (ty === "sky_multiplier") {
+            mul = t.skyHitMul ?? 1;
+        } else if (ty === "pickup") {
+            mul = t.pickupHitMul ?? 1;
+        } else if (ty === "bomb") {
+            mul = t.bombHitMul ?? 1;
+        } else {
+            return raw;
+        }
+        return raw * Math.max(1, mul);
+    }
+
     getDollCircleRadius() {
         const doll = this.dollController?.doll;
         const w = doll?.displayWidth || 120;
         const h = doll?.displayHeight || 120;
         // Slightly forgiving vs strict mode, still smaller than the full sprite.
-        return Math.max(13, Math.min(22, Math.min(w, h) * 0.145));
+        let r = Math.max(13, Math.min(22, Math.min(w, h) * 0.145));
+        const t = GAME_CONFIG.skyMultipliers?.desktopCircleHitTweak;
+        if (t?.enabled && this.isDesktopPlayLayout()) {
+            const add = Number(t.dollRadiusAdd) || 0;
+            if (add > 0) {
+                r = Math.min(24, r + add);
+            }
+        }
+        return r;
     }
 
     getCircleItemHitRadius(item) {
+        let r;
         if (item?.hitRadius != null) {
-            return Math.max(0, Number(item.hitRadius) || 0);
+            r = Math.max(0, Number(item.hitRadius) || 0);
+        } else {
+            const skyCfg = GAME_CONFIG.skyMultipliers || {};
+            if (item?.type === "sky_multiplier") {
+                const base = item.radius ?? skyCfg.nodeRadius ?? 20;
+                r = skyCfg.hitRadius ?? Math.max(8, Math.round(base * 0.65));
+            } else if (item?.type === "pickup") {
+                const scale = skyCfg.pickupHitScale ?? 0.82;
+                const base = item.radius ?? 18;
+                r = Math.max(8, base * scale);
+            } else {
+                r = Math.max(0, item?.radius ?? 0);
+            }
         }
-        const skyCfg = GAME_CONFIG.skyMultipliers || {};
-        if (item?.type === "sky_multiplier") {
-            const base = item.radius ?? skyCfg.nodeRadius ?? 20;
-            return skyCfg.hitRadius ?? Math.max(8, Math.round(base * 0.65));
-        }
-        if (item?.type === "pickup") {
-            const scale = skyCfg.pickupHitScale ?? 0.82;
-            const base = item.radius ?? 18;
-            return Math.max(8, base * scale);
-        }
-        return item?.radius ?? 0;
+        return this.applyDesktopCircleHitTweak(item, r);
     }
 
     addCombo() {

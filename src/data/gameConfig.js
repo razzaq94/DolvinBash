@@ -119,6 +119,14 @@ export const GAME_CONFIG = {
         // Long single-frame sweeps are split so we do not count near-misses along the chord.
         maxSweepSegmentPx: 46,
         pickupHitScale: 0.82,
+        // PC (wide / ENVELOP): slightly larger circle hits than mobile — “thora thora” only.
+        desktopCircleHitTweak: {
+            enabled: true,
+            skyHitMul: 1.06,
+            pickupHitMul: 1.05,
+            bombHitMul: 1.065,
+            dollRadiusAdd: 0.75
+        },
         minGap: 0, // New: controls minimum spacing between multipliers
         maxGap: 0, // New: controls maximum spacing between multipliers
         pool: [
