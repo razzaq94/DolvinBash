@@ -64,6 +64,11 @@ export default class DollController {
         this.onHoleFallComplete = null;
         this.groundedMs = 0;
         this.wasOnGround = false;
+
+        // Desktop: sampled each launch — random roll length vs obstacles.
+        this.pcRollFrictionHeat = 1;
+        this.pcRollStopMsExtra = 0;
+        this.pcStopVxMul = 1;
     }
 
     create() {
@@ -137,6 +142,9 @@ export default class DollController {
         this.wasOnGround = false;
         this.onHoleFallComplete = null;
         this.groundedMs = 0;
+        this.pcRollFrictionHeat = 1;
+        this.pcRollStopMsExtra = 0;
+        this.pcStopVxMul = 1;
 
         this.clearTrails();
         this.trailsEnabled = true;
@@ -212,12 +220,46 @@ export default class DollController {
         this.maxX = this.position.x;
         this.minY = this.position.y;
 
+        this.sampleDesktopRollVariance();
+
         const launchXMultiplier = this.speedTuning.launchXMultiplier ?? 1;
         const launchYMultiplier = this.speedTuning.launchYMultiplier ?? 1;
         this.velocity.x = GAME_CONFIG.doll.launchVelocityX * launchXMultiplier;
         this.velocity.y = GAME_CONFIG.doll.launchVelocityY * launchYMultiplier;
 
         this.setExpression("determined");
+    }
+
+    sampleDesktopRollVariance() {
+        const cfg = GAME_CONFIG.doll?.pcDesktopRollVariance;
+        if (!cfg?.enabled) {
+            this.pcRollFrictionHeat = 1;
+            this.pcRollStopMsExtra = 0;
+            this.pcStopVxMul = 1;
+            return;
+        }
+        const layout = this.scene.getViewportLayout?.();
+        const w = this.scene.scale?.width ?? 0;
+        const isMobile = layout ? layout.isMobile : w < 900;
+        if (isMobile) {
+            this.pcRollFrictionHeat = 1;
+            this.pcRollStopMsExtra = 0;
+            this.pcStopVxMul = 1;
+            return;
+        }
+
+        this.pcRollFrictionHeat = Phaser.Math.FloatBetween(
+            cfg.frictionHeatMin ?? 0.55,
+            cfg.frictionHeatMax ?? 1.45
+        );
+        this.pcRollStopMsExtra = Phaser.Math.Between(
+            cfg.groundedMsExtraMin ?? -350,
+            cfg.groundedMsExtraMax ?? 1300
+        );
+        this.pcStopVxMul = Phaser.Math.FloatBetween(
+            cfg.stopVxMulMin ?? 0.7,
+            cfg.stopVxMulMax ?? 1.38
+        );
     }
 
     applyImpulse(x, y, forceReset = false) {
@@ -357,7 +399,12 @@ export default class DollController {
                 // - frictionMultiplier < 1 => weaker friction (less slowdown)
                 const baseFriction = Phaser.Math.Clamp(GAME_CONFIG.doll.friction ?? 0.995, 0.90, 0.9999);
                 const fm = Phaser.Math.Clamp(Number(frictionMultiplier) || 1, 0.6, 1.6);
-                const effectiveFriction = Phaser.Math.Clamp(Math.pow(baseFriction, fm), 0.90, 0.9999);
+                let effectiveFriction = Phaser.Math.Clamp(Math.pow(baseFriction, fm), 0.90, 0.9999);
+                const heat = this.pcRollFrictionHeat ?? 1;
+                if (heat !== 1) {
+                    // heat < 1 → gentler slowdown (longer roll); heat > 1 → stronger slowdown (shorter roll).
+                    effectiveFriction = 1 + (effectiveFriction - 1) * heat;
+                }
                 this.velocity.x *= effectiveFriction;
                 if (!this.isExpressionLocked()) {
                     this.setExpression("dizzy");
@@ -385,19 +432,31 @@ export default class DollController {
         const collisionThreshold = this.groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isAtRestOnGround = this.position.y >= collisionThreshold - 0.1;
 
+        const vCfg = GAME_CONFIG.doll?.pcDesktopRollVariance || {};
+        const baseStopMs = 1400;
+        const stopMs = Phaser.Math.Clamp(
+            baseStopMs + (this.pcRollStopMsExtra ?? 0),
+            vCfg.minGroundedToAllowStop ?? 380,
+            vCfg.maxGroundedToAllowStop ?? 3600
+        );
+        const vxStop = Math.max(
+            3.5,
+            (GAME_CONFIG.doll.stopVelocityX * 0.22) * (this.pcStopVxMul ?? 1)
+        );
+
         const shouldStopByVelocity =
             !this.isFallingInHole &&
-            Math.abs(this.velocity.x) <= Math.max(3.5, (GAME_CONFIG.doll.stopVelocityX * 0.22)) &&
+            Math.abs(this.velocity.x) <= vxStop &&
             Math.abs(this.velocity.y) <= 1 &&
             isAtRestOnGround &&
-            this.groundedMs >= 1400;
+            this.groundedMs >= stopMs;
 
         // Safety timeout should never end mid-air. Round must resolve after ground contact.
         const shouldStopByTime = this.elapsedMs >= GAME_CONFIG.doll.maxFlightTimeMs;
 
         if (
             shouldStopByVelocity ||
-            (!this.isFallingInHole && shouldStopByTime && isAtRestOnGround && this.groundedMs >= 1400)
+            (!this.isFallingInHole && shouldStopByTime && isAtRestOnGround && this.groundedMs >= stopMs)
         ) {
             this.stopMovement();
         }

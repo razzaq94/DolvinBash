@@ -56,7 +56,19 @@ export const GAME_CONFIG = {
         friction: 0.995, // Increased from 0.992 for better carry
         rotationSpeed: 5.5,
         collisionYOffsetFromGround: 10, // Visual offset for landing on road
-        maxFlightTimeMs: 7000 // Increased from 5000 to allow longer flights
+        maxFlightTimeMs: 7000, // Increased from 5000 to allow longer flights
+        // Desktop only: each round randomizes ground roll (long slide vs early stop) so obstacle timing varies.
+        pcDesktopRollVariance: {
+            enabled: true,
+            frictionHeatMin: 0.55,
+            frictionHeatMax: 1.45,
+            groundedMsExtraMin: -350,
+            groundedMsExtraMax: 1300,
+            stopVxMulMin: 0.7,
+            stopVxMulMax: 1.38,
+            minGroundedToAllowStop: 380,
+            maxGroundedToAllowStop: 3600
+        }
     },
 
     kicker: {
@@ -193,16 +205,24 @@ export const GAME_CONFIG = {
             gapMax: 1700,
             firstGapAfterRollMin: 480,
             firstGapAfterRollMax: 1040,
-            // Mobile: spawn at viewport right edge. Desktop: viewport horizontal center (fairer threat on wide screens).
+            // Desktop (ENVELOP / wide): clearer lanes made "nothing" feel like ~1/5 spawns; tune separately from mobile.
+            gapMinDesktop: 560,
+            gapMaxDesktop: 1180,
+            firstGapAfterRollMinDesktop: 360,
+            firstGapAfterRollMaxDesktop: 820,
             rightEdgePaddingPx: 44,
             rightEdgePaddingRatio: 0.07,
-            desktopMidJitterPx: 20,
-            minAheadOfDollPx: 48,
             spawnWeights: {
                 nothing: 34,
                 hole: 20,
                 trafficcone: 28,
                 roadblocker: 18
+            },
+            spawnWeightsDesktop: {
+                nothing: 18,
+                hole: 24,
+                trafficcone: 30,
+                roadblocker: 28
             }
         },
         hazardRules: {

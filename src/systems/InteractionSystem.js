@@ -726,7 +726,13 @@ export default class InteractionSystem {
     }
 
     pickRoadObstacleSpawnKind() {
-        const cfg = GAME_CONFIG.encounters?.roadObstacleStream?.spawnWeights || {};
+        const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+        const cfg =
+            !isMobile && streamCfg.spawnWeightsDesktop
+                ? streamCfg.spawnWeightsDesktop
+                : streamCfg.spawnWeights || {};
         const entries = [
             ["nothing", Math.max(0, Number(cfg.nothing) || 0)],
             ["hole", Math.max(0, Number(cfg.hole) || 0)],
@@ -1301,27 +1307,17 @@ export default class InteractionSystem {
         item.active = true;
     }
 
-    /** Mobile: right edge of viewport. Desktop: horizontal middle (obstacles feel too easy at the far-right edge on PC). */
-    getRoadObstacleSpawnWorldX(dollX) {
+    /** Viewport right edge in world X (same on mobile + desktop — PC center-spawn was too easy to skip past before roll ended). */
+    getRoadObstacleSpawnWorldX() {
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
         const viewW = Math.max(1, this.scene.scale.width);
         const cameraRight = cameraLeft + viewW;
-        const layout = this.scene.getViewportLayout?.();
-        const isMobile = layout ? layout.isMobile : viewW < 900;
         const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
-
-        if (isMobile) {
-            const padPx = streamCfg.rightEdgePaddingPx ?? 44;
-            const padRatio = streamCfg.rightEdgePaddingRatio ?? 0.07;
-            const pad = Math.max(padPx, Math.round(viewW * padRatio));
-            return cameraRight - pad;
-        }
-
-        const jitter = streamCfg.desktopMidJitterPx ?? 20;
-        const midX = cameraLeft + viewW * 0.5 + Phaser.Math.Between(-jitter, jitter);
-        const minAhead = streamCfg.minAheadOfDollPx ?? 48;
-        return Math.max(midX, dollX + minAhead);
+        const padPx = streamCfg.rightEdgePaddingPx ?? 44;
+        const padRatio = streamCfg.rightEdgePaddingRatio ?? 0.07;
+        const pad = Math.max(padPx, Math.round(viewW * padRatio));
+        return cameraRight - pad;
     }
 
     maintainHazardStream(dollX) {
@@ -1339,8 +1335,14 @@ export default class InteractionSystem {
         if (!this.roadObstacleStreamUnlocked) {
             this.roadObstacleStreamUnlocked = true;
             this.activateDeferredPatternRoadHazards();
-            const gmin = streamCfg.firstGapAfterRollMin ?? 480;
-            const gmax = streamCfg.firstGapAfterRollMax ?? 1040;
+            const layout = this.scene.getViewportLayout?.();
+            const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+            const gmin = isMobile
+                ? (streamCfg.firstGapAfterRollMin ?? 480)
+                : (streamCfg.firstGapAfterRollMinDesktop ?? streamCfg.firstGapAfterRollMin ?? 480);
+            const gmax = isMobile
+                ? (streamCfg.firstGapAfterRollMax ?? 1040)
+                : (streamCfg.firstGapAfterRollMaxDesktop ?? streamCfg.firstGapAfterRollMax ?? 1040);
             this.nextHazardSpawnX = dollX + Phaser.Math.Between(gmin, gmax);
         }
 
@@ -1384,13 +1386,15 @@ export default class InteractionSystem {
             }
 
             if (candidate) {
-                const spawnX = this.getRoadObstacleSpawnWorldX(dollX);
+                const spawnX = this.getRoadObstacleSpawnWorldX();
                 this.placeHazardProcedural(candidate, spawnX, kind);
             }
         }
 
-        const gapMin = streamCfg.gapMin ?? 760;
-        const gapMax = streamCfg.gapMax ?? 1700;
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+        const gapMin = isMobile ? (streamCfg.gapMin ?? 760) : (streamCfg.gapMinDesktop ?? streamCfg.gapMin ?? 760);
+        const gapMax = isMobile ? (streamCfg.gapMax ?? 1700) : (streamCfg.gapMaxDesktop ?? streamCfg.gapMax ?? 1700);
         this.nextHazardSpawnX = dollX + Phaser.Math.Between(gapMin, gapMax);
     }
 
