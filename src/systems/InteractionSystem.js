@@ -186,8 +186,9 @@ export default class InteractionSystem {
             }
         }
 
-        const phase = sc.spawnPhaseOffsetX ?? 180;
-        // Phase-shift from bomb cursor (already reset in initBombStream for this pattern).
+        const basePhase = sc.spawnPhaseOffsetX ?? 180;
+        const phase = basePhase + Phaser.Math.Between(-140, 160);
+        // Phase-shift from bomb cursor + per-round jitter so bats don’t line up with bombs.
         this.nextBatSpawnX = this.nextBombSpawnX + phase;
     }
 
@@ -337,7 +338,8 @@ export default class InteractionSystem {
         glow.setDepth(26);
         glow.setVisible(false);
         shape.setDepth(27);
-        text.setDepth(28);
+        // Above bat obstacle sprites (~35) so numbers never paint under the bat if edges align.
+        text.setDepth(48);
 
         const item = {
             type: "sky_multiplier",
@@ -502,6 +504,10 @@ export default class InteractionSystem {
             shape = this.scene.add.image(x, y, keys[0]).setOrigin(0.5, 0.5).setDepth(35);
             batBaseScale = Math.min(tw / shape.width, th / shape.height);
             shape.setScale(batBaseScale);
+            // HD bat: smooth sub-pixel motion (filtering is set on textures in PreloadScene).
+            if (typeof shape.setRoundPixels === "function") {
+                shape.setRoundPixels(false);
+            }
         } else {
             shape = this.scene.add.rectangle(x, y, tw, th, 0x6b21a8).setStrokeStyle(2, 0x312e81).setDepth(35);
         }
@@ -684,9 +690,29 @@ export default class InteractionSystem {
             }
         }
 
-        // Last safety: push much farther ahead at a safe row.
-        const safeYOffset = this.getRandomSkyYOffset(cfg);
-        return { x: probeX + 40, yOffset: safeYOffset };
+        // Never return an unchecked position — scan forward with multiple Y tries per column.
+        for (let j = 0; j < 2500; j++) {
+            probeX += 10;
+            for (let t = 0; t < 14; t++) {
+                const yOffset = this.getRandomSkyYOffset(cfg);
+                const y = groundY + yOffset;
+                if (this.isSkyPositionFree(probeX, y, excludeItem)) {
+                    return { x: probeX, yOffset };
+                }
+            }
+        }
+
+        let scanX = probeX + 200;
+        for (let k = 0; k < 8000; k++) {
+            scanX += 22;
+            const yOffset = this.getRandomSkyYOffset(cfg);
+            const y = groundY + yOffset;
+            if (this.isSkyPositionFree(scanX, y, excludeItem)) {
+                return { x: scanX, yOffset };
+            }
+        }
+
+        return { x: scanX + 400, yOffset: this.getRandomSkyYOffset(cfg) };
     }
 
     getRandomSkyYOffset(cfg) {
@@ -1194,7 +1220,11 @@ export default class InteractionSystem {
             gapMax: pc ? (cfg.gapMaxDesktop ?? cfg.gapMax ?? 220) : (cfg.gapMax ?? 220),
             failMin: pc ? (cfg.unablePlaceGapMinDesktop ?? cfg.unablePlaceGapMin ?? 140) : (cfg.unablePlaceGapMin ?? 140),
             failMax: pc ? (cfg.unablePlaceGapMaxDesktop ?? cfg.unablePlaceGapMax ?? 220) : (cfg.unablePlaceGapMax ?? 220),
-            fillAhead: pc ? (cfg.fillAheadPxDesktop ?? cfg.fillAheadPx ?? 2200) : (cfg.fillAheadPx ?? 2200)
+            fillAhead: pc ? (cfg.fillAheadPxDesktop ?? cfg.fillAheadPx ?? 2200) : (cfg.fillAheadPx ?? 2200),
+            thinChance: Math.max(0, Math.min(100, cfg.spawnThinPercent ?? 0)),
+            maxSteps: Math.max(4, cfg.maxSpawnStepsPerFrame ?? 22),
+            jx0: cfg.xJitterMin ?? -40,
+            jx1: cfg.xJitterMax ?? 60
         };
     }
 
@@ -1209,7 +1239,10 @@ export default class InteractionSystem {
                 : (sc.unablePlaceGapMin ?? 140),
             failMax: pc ? (sc.unablePlaceGapMaxDesktop ?? bombCfg.unablePlaceGapMaxDesktop ?? 220)
                 : (sc.unablePlaceGapMax ?? 220),
-            fillAhead: pc ? (sc.fillAheadPxDesktop ?? bombCfg.fillAheadPxDesktop ?? 2200) : (sc.fillAheadPx ?? 2200),
+            fillAhead: pc ? (sc.fillAheadPxDesktop ?? sc.fillAheadPx ?? bombCfg.fillAheadPxDesktop ?? 2200)
+                : (sc.fillAheadPx ?? bombCfg.fillAheadPx ?? 2200),
+            thinChance: Math.max(0, Math.min(100, sc.spawnThinPercent ?? 0)),
+            maxSteps: Math.max(4, sc.maxSpawnStepsPerFrame ?? 20),
             jx0: sc.xJitterMin ?? -40,
             jx1: sc.xJitterMax ?? 60
         };
@@ -1243,7 +1276,18 @@ export default class InteractionSystem {
         const minYOffset = skyCfg.minYOffset ?? -450;
         const maxYOffset = skyCfg.maxYOffset ?? -180;
 
-        while (this.nextBombSpawnX < spawnLimitX) {
+        const jx0 = bt.jx0;
+        const jx1 = bt.jx1;
+        let stepCount = 0;
+
+        while (this.nextBombSpawnX < spawnLimitX && stepCount < bt.maxSteps) {
+            stepCount += 1;
+
+            if (bt.thinChance > 0 && Phaser.Math.Between(0, 99) < bt.thinChance) {
+                this.nextBombSpawnX += Phaser.Math.Between(bt.gapMin, bt.gapMax);
+                continue;
+            }
+
             let candidate = null;
             for (let i = 0; i < this.proceduralBombs.length; i++) {
                 if (!this.proceduralBombs[i].active) {
@@ -1266,12 +1310,12 @@ export default class InteractionSystem {
                 let y = 0;
                 let yOffset = 0;
 
-                for (let attempt = 0; attempt < 6; attempt++) {
+                for (let attempt = 0; attempt < 14; attempt++) {
                     yOffset = Phaser.Math.Between(minYOffset, maxYOffset);
-                    x = this.nextBombSpawnX + Phaser.Math.Between(-40, 60);
+                    x = this.nextBombSpawnX + Phaser.Math.Between(jx0, jx1);
                     y = groundY + yOffset;
 
-                    if (this.isBombSpotClear(x, y, 130)) {
+                    if (this.isBombSpotClear(x, y, "bomb")) {
                         placed = true;
                         break;
                     }
@@ -1303,7 +1347,6 @@ export default class InteractionSystem {
                 candidate.glow?.setVisible(true);
             }
 
-            // Higher quantity throughout the game: smaller gaps.
             this.nextBombSpawnX += Phaser.Math.Between(bt.gapMin, bt.gapMax);
         }
     }
@@ -1335,7 +1378,16 @@ export default class InteractionSystem {
         const minYOffset = skyCfg.minYOffset ?? -450;
         const maxYOffset = skyCfg.maxYOffset ?? -180;
 
-        while (this.nextBatSpawnX < spawnLimitX) {
+        let stepCount = 0;
+
+        while (this.nextBatSpawnX < spawnLimitX && stepCount < bt.maxSteps) {
+            stepCount += 1;
+
+            if (bt.thinChance > 0 && Phaser.Math.Between(0, 99) < bt.thinChance) {
+                this.nextBatSpawnX += Phaser.Math.Between(bt.gapMin, bt.gapMax);
+                continue;
+            }
+
             let candidate = null;
             for (let i = 0; i < this.proceduralBats.length; i++) {
                 if (!this.proceduralBats[i].active) {
@@ -1357,12 +1409,12 @@ export default class InteractionSystem {
                 let y = 0;
                 let yOffset = 0;
 
-                for (let attempt = 0; attempt < 6; attempt++) {
+                for (let attempt = 0; attempt < 14; attempt++) {
                     yOffset = Phaser.Math.Between(minYOffset, maxYOffset);
                     x = this.nextBatSpawnX + Phaser.Math.Between(jx0, jx1);
                     y = groundY + yOffset;
 
-                    if (this.isBombSpotClear(x, y, 130)) {
+                    if (this.isBombSpotClear(x, y, "bat")) {
                         placed = true;
                         break;
                     }
@@ -1536,7 +1588,7 @@ export default class InteractionSystem {
         item.text.setScale(1);
         item.text.setAlpha(1);
         item.text.setVisible(true);
-        item.text.setDepth(28);
+        item.text.setDepth(48);
 
         // Keep numbers static (no floating/pulsing motion)
         if (item.pulseTween) {
@@ -1775,15 +1827,89 @@ export default class InteractionSystem {
             }
         }
 
+        let scanX = minX;
+        for (let j = 0; j < 240; j++) {
+            scanX += 10;
+            const yOffset = Phaser.Math.Clamp(
+                Math.round(targetYOffset + Phaser.Math.Between(-80, 80)),
+                minYOffset,
+                maxYOffset
+            );
+            const y = groundY + yOffset;
+            if (this.isSkyPositionFree(scanX, y, excludeItem)) {
+                return { x: scanX, yOffset };
+            }
+        }
+
         return fallback;
+    }
+
+    getStrictAirThreatGap() {
+        return Math.max(8, GAME_CONFIG.skyMultipliers?.strictAirThreatGap ?? 22);
+    }
+
+    aabbOverlapCenters(ax, ay, ahw, ahh, bx, by, bhw, bhh) {
+        return Math.abs(ax - bx) < ahw + bhw && Math.abs(ay - by) < ahh + bhh;
+    }
+
+    getSkyMultiplierSeparationExtents(item) {
+        const gap = this.getStrictAirThreatGap();
+        const tw = item.text?.displayWidth ?? 48;
+        const th = item.text?.displayHeight ?? 48;
+        return {
+            hw: Math.max(30, tw * 0.5 + gap),
+            hh: Math.max(26, th * 0.5 + gap)
+        };
+    }
+
+    getBombThreatExtentsForSeparation(item) {
+        const gap = this.getStrictAirThreatGap() * 0.5;
+        if (item.sprite && item.sprite.displayWidth > 0) {
+            return {
+                hw: item.sprite.displayWidth * 0.5 + gap,
+                hh: item.sprite.displayHeight * 0.5 + gap
+            };
+        }
+        const r = (item.radius ?? 20) * 1.12 + gap;
+        return { hw: r, hh: r };
+    }
+
+    getBatThreatExtentsForSeparation(item) {
+        const f = this.getObstacleRectFactors(item);
+        const gap = this.getStrictAirThreatGap() * 0.5;
+        return {
+            hw: (item.width * f.wFactor) * 0.5 + gap,
+            hh: (item.height * f.hFactor) * 0.5 + gap
+        };
+    }
+
+    getBombSpawnCandidateExtents() {
+        const g = this.getStrictAirThreatGap();
+        const hw = 26 + g * 0.45;
+        const hh = 26 + g * 0.45;
+        return { hw, hh };
+    }
+
+    getBatSpawnCandidateExtents() {
+        const g = this.getStrictAirThreatGap();
+        const batCfg = GAME_CONFIG.bat || {};
+        const w = batCfg.streamTargetMaxPx ?? 96;
+        const f = batCfg.hitbox || {};
+        const wf = f.wFactor ?? 0.5;
+        const hf = f.hFactor ?? 0.52;
+        return {
+            hw: (w * wf) * 0.5 + g * 0.45,
+            hh: (w * hf) * 0.5 + g * 0.45
+        };
     }
 
     isSkyPositionFree(x, y, excludeItem = null) {
         const cfg = GAME_CONFIG.skyMultipliers || {};
         const nodeRadius = cfg.nodeRadius ?? 20;
-        const candidateHalfW = Math.max(24, nodeRadius + 16);
-        const candidateHalfH = Math.max(20, nodeRadius + 12);
-        const minGap = 10; // slightly bigger gap; strict no-overlap
+        const threatPad = this.getStrictAirThreatGap() * 0.5;
+        const candidateHalfW = Math.max(24, nodeRadius + 16) + threatPad;
+        const candidateHalfH = Math.max(20, nodeRadius + 12) + threatPad;
+        const minGap = 10;
 
         for (let i = 0; i < this.skyMultipliers.length; i++) {
             const item = this.skyMultipliers[i];
@@ -1805,6 +1931,33 @@ export default class InteractionSystem {
             const overlapY = Math.abs(dy) < (candidateHalfH + itemHalfH + minGap);
 
             if (overlapX && overlapY) {
+                return false;
+            }
+        }
+
+        for (let i = 0; i < this.bats.length; i++) {
+            const it = this.bats[i];
+            if (!it?.active) continue;
+            const { hw, hh } = this.getBatThreatExtentsForSeparation(it);
+            if (this.aabbOverlapCenters(x, y, candidateHalfW, candidateHalfH, it.x, it.y, hw, hh)) {
+                return false;
+            }
+        }
+
+        for (let i = 0; i < this.bombs.length; i++) {
+            const it = this.bombs[i];
+            if (!it?.active) continue;
+            const { hw, hh } = this.getBombThreatExtentsForSeparation(it);
+            if (this.aabbOverlapCenters(x, y, candidateHalfW, candidateHalfH, it.x, it.y, hw, hh)) {
+                return false;
+            }
+        }
+
+        for (let i = 0; i < this.pickups.length; i++) {
+            const it = this.pickups[i];
+            if (!it?.active) continue;
+            const pr = (it.radius ?? 18) + this.getStrictAirThreatGap() * 0.5;
+            if (this.aabbOverlapCenters(x, y, candidateHalfW, candidateHalfH, it.x, it.y, pr, pr)) {
                 return false;
             }
         }
@@ -2319,24 +2472,51 @@ export default class InteractionSystem {
         return bestItem;
     }
 
-    isBombSpotClear(x, y, minDist = 120) {
-        const minDistSq = minDist * minDist;
-        const checkLists = [this.skyMultipliers, this.pickups, this.bombs, this.bats];
+    /**
+     * Bomb/bat procedural spawn: must not overlap sky numbers, pickups, or other bombs/bats (AABB, strict).
+     * @param {"bomb"|"bat"} placerType
+     */
+    isBombSpotClear(x, y, placerType = "bomb") {
+        const { hw: chw, hh: chh } = placerType === "bat"
+            ? this.getBatSpawnCandidateExtents()
+            : this.getBombSpawnCandidateExtents();
 
-        for (let l = 0; l < checkLists.length; l++) {
-            const items = checkLists[l];
-            for (let i = 0; i < items.length; i++) {
-                const it = items[i];
-                if (!it?.active) continue;
-                if (it.x == null || it.y == null) continue;
-                // Don't compare with itself; caller handles candidate being inactive before spawn.
-                const dx = (x - it.x);
-                const dy = (y - it.y);
-                if ((dx * dx) + (dy * dy) < minDistSq) {
-                    return false;
-                }
+        for (let i = 0; i < this.skyMultipliers.length; i++) {
+            const it = this.skyMultipliers[i];
+            if (!it?.active) continue;
+            const { hw, hh } = this.getSkyMultiplierSeparationExtents(it);
+            if (this.aabbOverlapCenters(x, y, chw, chh, it.x, it.y, hw, hh)) {
+                return false;
             }
         }
+
+        for (let i = 0; i < this.pickups.length; i++) {
+            const it = this.pickups[i];
+            if (!it?.active) continue;
+            const pr = (it.radius ?? 18) + this.getStrictAirThreatGap() * 0.5;
+            if (this.aabbOverlapCenters(x, y, chw, chh, it.x, it.y, pr, pr)) {
+                return false;
+            }
+        }
+
+        for (let i = 0; i < this.bombs.length; i++) {
+            const it = this.bombs[i];
+            if (!it?.active) continue;
+            const { hw, hh } = this.getBombThreatExtentsForSeparation(it);
+            if (this.aabbOverlapCenters(x, y, chw, chh, it.x, it.y, hw, hh)) {
+                return false;
+            }
+        }
+
+        for (let i = 0; i < this.bats.length; i++) {
+            const it = this.bats[i];
+            if (!it?.active) continue;
+            const { hw, hh } = this.getBatThreatExtentsForSeparation(it);
+            if (this.aabbOverlapCenters(x, y, chw, chh, it.x, it.y, hw, hh)) {
+                return false;
+            }
+        }
+
         return true;
     }
 

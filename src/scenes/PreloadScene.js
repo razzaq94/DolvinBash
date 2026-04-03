@@ -79,10 +79,38 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.audio("bgm_loop", "https://labs.phaser.io/assets/audio/tech.mp3");
     }
 
+    /**
+     * Bat-only: linear texture filtering so scaled wing frames stay smooth (HD art on mobile + PC).
+     */
+    applyBatHdTextureSettings() {
+        const keys = ["bat_wing_up", "bat_wing_mid", "bat_wing_down"];
+        const F = Phaser.Textures?.FilterMode;
+        if (!F) {
+            return;
+        }
+
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            if (!this.textures.exists(key)) {
+                continue;
+            }
+            const tex = this.textures.get(key);
+            try {
+                if (typeof tex.setFilter === "function") {
+                    tex.setFilter(F.LINEAR);
+                }
+            } catch (_) {
+                /* ignore */
+            }
+        }
+    }
+
     create() {
         if (GAME_CONFIG.debug.enableLogs) {
             console.log("[PreloadScene] create");
         }
+
+        this.applyBatHdTextureSettings();
 
         this.scale.off("resize", this.handleResize, this);
 

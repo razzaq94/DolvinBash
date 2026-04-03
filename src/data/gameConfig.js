@@ -118,6 +118,8 @@ export const GAME_CONFIG = {
         hitRadius: 15,
         // Long single-frame sweeps are split so we do not count near-misses along the chord.
         maxSweepSegmentPx: 46,
+        // Minimum padding between sky numbers and bats/bombs (AABB separation; strict no overlap).
+        strictAirThreatGap: 22,
         pickupHitScale: 0.82,
         // PC (wide / ENVELOP): slightly larger circle hits than mobile — “thora thora” only.
         desktopCircleHitTweak: {
@@ -138,18 +140,22 @@ export const GAME_CONFIG = {
         ]
     },
 
-    // Procedural bombs in the sky lane: desktop-only denser gaps + wider pre-fill so replay matches multiplier density.
+    // Procedural bombs: fewer hazards, wider random gaps; thinPercent = empty “air pocket” slots.
     proceduralBombStream: {
-        gapMin: 120,
-        gapMax: 220,
-        unablePlaceGapMin: 140,
-        unablePlaceGapMax: 220,
-        fillAheadPx: 2200,
-        gapMinDesktop: 76,
-        gapMaxDesktop: 138,
-        unablePlaceGapMinDesktop: 82,
-        unablePlaceGapMaxDesktop: 150,
-        fillAheadPxDesktop: 3400
+        gapMin: 260,
+        gapMax: 460,
+        unablePlaceGapMin: 200,
+        unablePlaceGapMax: 380,
+        fillAheadPx: 1050,
+        gapMinDesktop: 300,
+        gapMaxDesktop: 540,
+        unablePlaceGapMinDesktop: 220,
+        unablePlaceGapMaxDesktop: 420,
+        fillAheadPxDesktop: 1350,
+        spawnThinPercent: 42,
+        maxSpawnStepsPerFrame: 18,
+        xJitterMin: -56,
+        xJitterMax: 78
     },
 
     // Softer sim on narrow mobile GPUs (e.g. jerky flight under high timeScale or frame spikes).
@@ -216,26 +222,29 @@ export const GAME_CONFIG = {
         impulseY: -720,
         diveVelocityY: 980,
         diveVelocityX: 260,
-        displayWidth: 120,
-        displayHeight: 82,
-        // Procedural stream: slightly larger than bomb cap (radius 20 * 2.25 = 45) for readability.
-        streamTargetMaxPx: 54,
+        // Pattern-spawned bats: same HD box as procedural (full source detail, mobile + PC).
+        displayWidth: 140,
+        displayHeight: 96,
+        // Max on-screen size (world px): large enough to use client PNGs sharply; same on mobile + desktop.
+        streamTargetMaxPx: 96,
         stream: {
             poolCount: 90,
-            gapMin: 120,
-            gapMax: 220,
-            gapMinDesktop: 76,
-            gapMaxDesktop: 138,
-            unablePlaceGapMin: 140,
-            unablePlaceGapMax: 220,
-            unablePlaceGapMinDesktop: 82,
-            unablePlaceGapMaxDesktop: 150,
-            fillAheadPx: 2200,
-            fillAheadPxDesktop: 3400,
-            xJitterMin: -40,
-            xJitterMax: 60,
-            // Start slightly ahead of bomb stream so bats and bombs interleave, not stack.
-            spawnPhaseOffsetX: 180
+            gapMin: 280,
+            gapMax: 500,
+            gapMinDesktop: 320,
+            gapMaxDesktop: 580,
+            unablePlaceGapMin: 220,
+            unablePlaceGapMax: 400,
+            unablePlaceGapMinDesktop: 240,
+            unablePlaceGapMaxDesktop: 460,
+            fillAheadPx: 980,
+            fillAheadPxDesktop: 1280,
+            spawnThinPercent: 48,
+            maxSpawnStepsPerFrame: 16,
+            xJitterMin: -64,
+            xJitterMax: 84,
+            // Desync from bomb column so they don’t spawn in the same stripe as often.
+            spawnPhaseOffsetX: 420
         },
         wingFrameMs: 128,
         wingTextureUp: "bat_wing_up",
