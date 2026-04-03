@@ -168,7 +168,7 @@ export default class PreloadScene extends Phaser.Scene {
         this.loadingText.setText(`Preparing Game Assets (${percentText})`);
         this.loadingText.setPosition(width * 0.5, barY - (isMobile ? 46 : 52));
         this.loadingText.setStyle({
-            fontFamily: '"Outfit", "Inter", Arial, sans-serif',
+            fontFamily: '"Luckiest Guy", cursive',
             fontSize: titleSize,
             fontStyle: "600",
             color: "#ffffff"
