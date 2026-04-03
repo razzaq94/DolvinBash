@@ -882,11 +882,14 @@ export default class InteractionSystem {
 
         // Professional collision core:
         // - bats: tighter torso
-        // - road obstacles: slightly larger + swept to avoid landing/roll misses
+        // - road obstacles: doll + obstacle factors from GAME_CONFIG.roadObstacleColliders
         const dollWTorso = (this.dollController.doll?.displayWidth || 120) * 0.30;
         const dollHTorso = (this.dollController.doll?.displayHeight || 120) * 0.36;
-        const dollWRoad = (this.dollController.doll?.displayWidth || 120) * 0.44;
-        const dollHRoad = (this.dollController.doll?.displayHeight || 120) * 0.50;
+        const rc = GAME_CONFIG.roadObstacleColliders || {};
+        const dw = this.dollController.doll?.displayWidth || 120;
+        const dh = this.dollController.doll?.displayHeight || 120;
+        const dollWRoad = dw * (rc.dollHalfWidthFactor ?? 0.32);
+        const dollHRoad = dh * (rc.dollHalfHeightFactor ?? 0.38);
 
         // Bat interactions (rect collision)
         this.checkRectCollisions(this.bats, dollX, dollY, dollWTorso, dollHTorso, (item) => {
@@ -2051,21 +2054,34 @@ export default class InteractionSystem {
         return true;
     }
 
+    getObstacleRectFactors(item) {
+        const v = item.variant;
+        const rc = GAME_CONFIG.roadObstacleColliders;
+        const roadCfg = rc?.[v];
+        if (roadCfg && typeof roadCfg.wFactor === "number") {
+            return {
+                wFactor: roadCfg.wFactor,
+                hFactor: typeof roadCfg.hFactor === "number" ? roadCfg.hFactor : roadCfg.wFactor
+            };
+        }
+
+        const isTall = (v === "tree" || v === "lamp_post" || v === "pole");
+        const isHole = (v === "hole");
+        const isWater = (v === "water");
+        const isRoadBlock = (v === "trafficcone" || v === "roadblocker");
+
+        const wFactor = isHole ? 0.52 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.82 : 0.62)));
+        const hFactor = isHole ? 0.50 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.78 : 0.66)));
+        return { wFactor, hFactor };
+    }
+
     checkRectCollisions(items, dollX, dollY, dollHalfW, dollHalfH, callback) {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (!item.active || item.hasCollided) continue;
 
             const originY = item.shape?.originY ?? 0.5;
-            
-            // Professional obstacle hitboxes: tighter and grounded.
-            const isTall = (item.variant === "tree" || item.variant === "lamp_post" || item.variant === "pole");
-            const isHole = (item.variant === "hole");
-            const isWater = (item.variant === "water");
-            const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
-            
-            const wFactor = isHole ? 0.52 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.82 : 0.62)));
-            const hFactor = isHole ? 0.50 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.78 : 0.66)));
+            const { wFactor, hFactor } = this.getObstacleRectFactors(item);
 
             const itemHalfW = (item.width * wFactor) * 0.5;
             const itemHalfH = (item.height * hFactor) * 0.5;
@@ -2108,10 +2124,7 @@ export default class InteractionSystem {
             if (filterFn && !filterFn(item)) continue;
 
             const originY = item.shape?.originY ?? 0.5;
-            const isHole = (item.variant === "hole");
-            const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
-            const wFactor = isHole ? 0.52 : (isRoadBlock ? 0.82 : 0.62);
-            const hFactor = isHole ? 0.50 : (isRoadBlock ? 0.78 : 0.66);
+            const { wFactor, hFactor } = this.getObstacleRectFactors(item);
 
             const itemHalfW = (item.width * wFactor) * 0.5;
             const itemHalfH = (item.height * hFactor) * 0.5;
@@ -2152,14 +2165,7 @@ export default class InteractionSystem {
             if (filterFn && !filterFn(item)) continue;
 
             const originY = item.shape?.originY ?? 0.5;
-
-            const isTall = (item.variant === "tree" || item.variant === "lamp_post" || item.variant === "pole");
-            const isHole = (item.variant === "hole");
-            const isWater = (item.variant === "water");
-            const isRoadBlock = (item.variant === "trafficcone" || item.variant === "roadblocker");
-
-            const wFactor = isHole ? 0.52 : (isTall ? 0.36 : (isWater ? 0.70 : (isRoadBlock ? 0.82 : 0.62)));
-            const hFactor = isHole ? 0.50 : (isTall ? 0.92 : (isWater ? 0.52 : (isRoadBlock ? 0.78 : 0.66)));
+            const { wFactor, hFactor } = this.getObstacleRectFactors(item);
 
             const itemHalfW = (item.width * wFactor) * 0.5;
             const itemHalfH = (item.height * hFactor) * 0.5;

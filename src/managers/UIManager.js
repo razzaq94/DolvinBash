@@ -31,6 +31,15 @@ export default class UIManager {
     createAll() {
         this.hudPanel = new HudPanel(this.scene);
         this.initHtmlUI();
+        this.layoutHud();
+    }
+
+    layoutHud() {
+        this.hudPanel?.layout();
+        // Web fonts / --ui-scale can change header height after first paint; sync on next frame.
+        if (typeof requestAnimationFrame !== "undefined") {
+            requestAnimationFrame(() => this.hudPanel?.layout());
+        }
     }
 
     initHtmlUI() {

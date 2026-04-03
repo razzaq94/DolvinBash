@@ -543,6 +543,7 @@ export default class GameScene extends Phaser.Scene {
 
         this.uiManager?.betPanel?.layout();
         this.uiManager?.resultPanel?.layout();
+        this.uiManager?.layoutHud?.();
     }
 
     getViewportLayout() {
