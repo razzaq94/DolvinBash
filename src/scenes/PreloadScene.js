@@ -4,6 +4,10 @@ export default class PreloadScene extends Phaser.Scene {
     constructor() {
         super("PreloadScene");
         this.loadingText = null;
+        this.loadingSubText = null;
+        this.loadingBarBg = null;
+        this.loadingBarFill = null;
+        this.loadingProgress = 0;
     }
 
     preload() {
@@ -13,6 +17,10 @@ export default class PreloadScene extends Phaser.Scene {
 
         this.drawLoadingText();
         this.scale.on("resize", this.handleResize, this);
+        this.load.on("progress", (value) => {
+            this.loadingProgress = Phaser.Math.Clamp(Number(value) || 0, 0, 1);
+            this.drawLoadingText();
+        });
 
         this.load.image("bg", "assets/seamless-bg-png-2.png");
         this.load.image("bg_skyline", "assets/obstacles/sky.png");
@@ -111,8 +119,13 @@ export default class PreloadScene extends Phaser.Scene {
         }
 
         this.applyBatHdTextureSettings();
+        this.load.off("progress");
 
         this.scale.off("resize", this.handleResize, this);
+        this.loadingText?.destroy();
+        this.loadingSubText?.destroy();
+        this.loadingBarBg?.destroy();
+        this.loadingBarFill?.destroy();
 
         this.scene.start("GameScene");
         this.scene.launch("UIScene");
@@ -122,14 +135,53 @@ export default class PreloadScene extends Phaser.Scene {
         const width = this.scale.width;
         const height = this.scale.height;
 
-        if (this.loadingText) {
-            this.loadingText.destroy();
+        if (!this.loadingText) {
+            this.loadingText = this.add.text(0, 0, "", {
+                fontSize: "32px",
+                color: "#ffffff"
+            }).setOrigin(0.5);
+        }
+        if (!this.loadingSubText) {
+            this.loadingSubText = this.add.text(0, 0, "", {
+                fontSize: "18px",
+                color: "#cbd5e1"
+            }).setOrigin(0.5);
         }
 
-        this.loadingText = this.add.text(width * 0.5, height * 0.5, "Loading...", {
-            fontSize: "32px",
+        if (!this.loadingBarBg) {
+            this.loadingBarBg = this.add.rectangle(0, 0, 1, 1, 0x0f172a, 0.85).setStrokeStyle(2, 0xffffff, 0.25);
+        }
+        if (!this.loadingBarFill) {
+            this.loadingBarFill = this.add.rectangle(0, 0, 1, 1, 0x22c55e, 1);
+        }
+
+        const isMobile = width < 900;
+        const titleSize = isMobile ? "24px" : "34px";
+        const subSize = isMobile ? "14px" : "18px";
+        const barW = Math.min(isMobile ? 360 : 560, Math.round(width * (isMobile ? 0.78 : 0.56)));
+        const barH = isMobile ? 18 : 22;
+        const barX = width * 0.5;
+        const barY = height * 0.5 + (isMobile ? 22 : 26);
+        const fillW = Math.max(0, Math.round(barW * this.loadingProgress));
+        const percentText = `${Math.round(this.loadingProgress * 100)}%`;
+
+        this.loadingText.setText(`Preparing Game Assets (${percentText})`);
+        this.loadingText.setPosition(width * 0.5, barY - (isMobile ? 46 : 52));
+        this.loadingText.setStyle({
+            fontFamily: '"Outfit", "Inter", Arial, sans-serif',
+            fontSize: titleSize,
+            fontStyle: "600",
             color: "#ffffff"
-        }).setOrigin(0.5);
+        });
+
+        this.loadingSubText.setText("");
+
+        this.loadingBarBg.setPosition(barX, barY);
+        this.loadingBarBg.setSize(barW, barH);
+
+        this.loadingBarFill.setOrigin(0, 0.5);
+        this.loadingBarFill.setPosition(barX - barW * 0.5, barY);
+        this.loadingBarFill.setSize(fillW, Math.max(8, barH - 8));
     }
 
     handleResize() {
