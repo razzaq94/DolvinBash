@@ -379,9 +379,18 @@ export default class DollController {
         this.wasOnGround = isOnGround;
 
         if (isOnGround) {
-            // Speed-synced rolling: circumference of visual match travel
-            const rollFactor = 0.22; 
-            this.doll.angle += this.velocity.x * rollFactor * 60 * deltaSeconds;
+            // Rolling animation should not wait until the doll becomes *fully* slow.
+            // Freeze spin mid-way so roll feels snappier (client feedback).
+            const isMobile = this.isMobilePlayLayout();
+            const freezeAfterMs = isMobile ? 420 : 520;
+            const freezeBelowVx = isMobile ? 120 : 95;
+            const freezeSpin = (this.groundedMs >= freezeAfterMs) || (Math.abs(this.velocity.x) <= freezeBelowVx);
+
+            if (!freezeSpin) {
+                // Speed-synced rolling: circumference of visual match travel
+                const rollFactor = 0.22;
+                this.doll.angle += this.velocity.x * rollFactor * 60 * deltaSeconds;
+            }
         } else {
             // Air trajectory tilt (skip when doing a "Superman" roll)
             if (this.currentExpression === "happy" && this.happySpinRemainingDeg > 0) {
