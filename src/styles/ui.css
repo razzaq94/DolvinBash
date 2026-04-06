@@ -117,6 +117,53 @@
     white-space: nowrap;
 }
 
+/* Header mute button (theme-matched) */
+.mute-btn {
+    pointer-events: auto;
+    margin-left: 10px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+    background: rgba(15, 23, 42, 0.72);
+    color: var(--text-main);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 10px 26px rgba(2, 6, 23, 0.22);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.mute-btn:hover {
+    background: rgba(15, 23, 42, 0.86);
+    border-color: rgba(148, 163, 184, 0.28);
+    transform: translateY(-1px);
+}
+
+.mute-btn:active {
+    transform: translateY(0px) scale(0.98);
+}
+
+.mute-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25), 0 10px 26px rgba(2, 6, 23, 0.22);
+    border-color: rgba(96, 165, 250, 0.45);
+}
+
+@media (max-width: 520px) {
+    .mute-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 11px;
+        font-size: 16px;
+    }
+}
+
 /* Glassmorphism utility */
 .glass-panel {
     background: var(--glass-bg);

@@ -29,6 +29,9 @@ export default class RoundManager {
             return;
         }
 
+        // If a previous round win stinger is still playing, stop it before kickoff.
+        this.scene.audioManager?.stop?.("sfx_win");
+
         this.clearSequence();
         this.isRoundActive = true;
         this.hitHazard = false;
@@ -193,13 +196,7 @@ export default class RoundManager {
             }
             this.uiManager.showResult(this.lastResult);
             this.uiManager.applyRoundResult(this.lastResult);
-            // Result stingers
-            if (this.lastResult.hitHazard) {
-                this.scene.audioManager?.play("sfx_loss", { volume: 0.6 });
-            } else {
-                this.scene.audioManager?.play("sfx_win", { volume: 0.6 });
-                this.scene.spawnWinParticles?.();
-            }
+            // Result stingers are handled below (after autoplay decrement).
 
             this.emitHostEvent("onDolvinRoundEnd", {
                 betAmount: this.lastResult.betAmount,
@@ -230,11 +227,24 @@ export default class RoundManager {
                 this.uiManager.clearAutoPlaySelection?.();
             }
 
+            const isAutoplayChain = prevRemaining > 0;
+            const isLastAutoplayRound = prevRemaining === 1;
+
             if (this.autoPlayRemaining > 0) {
                 this.pushEvent(this.scene.time.delayedCall(650, () => {
                     this.replay();
                     this.startPrototypeRound({ fromAutoplay: true });
                 }));
+            }
+
+            // Result stingers:
+            // - During autoplay: suppress win sound to avoid spam; only play on the final autoplay round.
+            // - Loss sound still plays immediately.
+            if (this.lastResult.hitHazard) {
+                this.scene.audioManager?.play("sfx_loss", { volume: 0.6 });
+            } else if (!isAutoplayChain || isLastAutoplayRound) {
+                this.scene.audioManager?.play("sfx_win", { volume: 0.6 });
+                this.scene.spawnWinParticles?.();
             }
         }));
     }

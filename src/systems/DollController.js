@@ -69,6 +69,9 @@ export default class DollController {
         this.pcRollFrictionHeat = 1;
         this.pcRollStopMsExtra = 0;
         this.pcStopVxMul = 1;
+
+        // Short window after a forced dive (bat hit) where ground bounce should be reduced.
+        this.hardDiveRemainingMs = 0;
     }
 
     create() {
@@ -145,6 +148,7 @@ export default class DollController {
         this.pcRollFrictionHeat = 1;
         this.pcRollStopMsExtra = 0;
         this.pcStopVxMul = 1;
+        this.hardDiveRemainingMs = 0;
 
         this.clearTrails();
         this.trailsEnabled = true;
@@ -309,8 +313,10 @@ export default class DollController {
     forceDiveDown(direction = 1) {
         const diveY = GAME_CONFIG.bat?.diveVelocityY ?? 980;
         const diveX = GAME_CONFIG.bat?.diveVelocityX ?? 260;
-        this.applyImpulse(Math.abs(diveX) * direction, Math.abs(diveY));
+        // Force reset so a bat hit ALWAYS drives the doll downward (otherwise Math.min() can keep it rising).
+        this.applyImpulse(Math.abs(diveX) * direction, Math.abs(diveY), true);
         this.setExpression("panic");
+        this.hardDiveRemainingMs = 650;
     }
 
     applyObstacleHit(impulseX, impulseY) {
@@ -330,6 +336,9 @@ export default class DollController {
         this.elapsedMs += deltaSeconds * 1000;
         this.trailTimer += deltaSeconds;
         this.expressionLockTimerMs = Math.max(0, this.expressionLockTimerMs - (deltaSeconds * 1000));
+        if (this.hardDiveRemainingMs > 0) {
+            this.hardDiveRemainingMs = Math.max(0, this.hardDiveRemainingMs - (deltaSeconds * 1000));
+        }
         if (this.trailThemeRemainingMs > 0) {
             this.trailThemeRemainingMs = Math.max(0, this.trailThemeRemainingMs - (deltaSeconds * 1000));
         }
@@ -384,7 +393,10 @@ export default class DollController {
             this.position.y = collisionThreshold;
 
             if (Math.abs(this.velocity.y) > GAME_CONFIG.doll.minBounceVelocity) {
-                this.velocity.y = -Math.abs(this.velocity.y) * GAME_CONFIG.doll.bounceDamping;
+                const hardDive = this.hardDiveRemainingMs > 0;
+                const damping = hardDive ? 0.18 : GAME_CONFIG.doll.bounceDamping;
+                const reboundCap = hardDive ? 320 : Infinity;
+                this.velocity.y = -Math.min(reboundCap, Math.abs(this.velocity.y) * damping);
                 this.velocity.x *= 0.92;
                 if (!this.isExpressionLocked()) {
                     this.setExpression("impact");
@@ -433,15 +445,15 @@ export default class DollController {
         const isAtRestOnGround = this.position.y >= collisionThreshold - 0.1;
 
         const vCfg = GAME_CONFIG.doll?.pcDesktopRollVariance || {};
-        const baseStopMs = 1400;
+        const baseStopMs = 980;
         const stopMs = Phaser.Math.Clamp(
             baseStopMs + (this.pcRollStopMsExtra ?? 0),
             vCfg.minGroundedToAllowStop ?? 380,
             vCfg.maxGroundedToAllowStop ?? 3600
         );
         const vxStop = Math.max(
-            3.5,
-            (GAME_CONFIG.doll.stopVelocityX * 0.22) * (this.pcStopVxMul ?? 1)
+            4.5,
+            (GAME_CONFIG.doll.stopVelocityX * 0.30) * (this.pcStopVxMul ?? 1)
         );
 
         const shouldStopByVelocity =

@@ -52,8 +52,8 @@ export const GAME_CONFIG = {
         launchVelocityY: -760,
         bounceDamping: 0.48,
         minBounceVelocity: 140,
-        stopVelocityX: 18,
-        friction: 0.995, // Increased from 0.992 for better carry
+        stopVelocityX: 26,
+        friction: 0.992,
         rotationSpeed: 5.5,
         collisionYOffsetFromGround: 10, // Visual offset for landing on road
         maxFlightTimeMs: 7000, // Increased from 5000 to allow longer flights
@@ -228,8 +228,9 @@ export const GAME_CONFIG = {
     bat: {
         impulseX: 420,
         impulseY: -720,
-        diveVelocityY: 980,
-        diveVelocityX: 260,
+        // Bat hit: harder downward drive and slightly less horizontal → “more straight down”.
+        diveVelocityY: 1480,
+        diveVelocityX: 140,
         // Pattern-spawned bats: same HD box as procedural (full source detail, mobile + PC).
         displayWidth: 140,
         displayHeight: 96,

@@ -1035,9 +1035,12 @@ export default class InteractionSystem {
                 this.resetCombo();
                 this.consumeObject(batHit);
                 this.popObject(batHit.shape, batHit.text, 0xa855f7);
+                // Stop any lingering win stinger before playing hit SFX.
+                this.scene.audioManager?.stop?.("sfx_win");
                 this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
                 this.spawnImpactParticles("bat", dollX, dollY);
-                this.applyRandomCollisionImpulse("hazard");
+                const dir = (this.dollController.velocity.x ?? 1) >= 0 ? 1 : -1;
+                this.dollController.forceDiveDown?.(dir);
                 this.dollController.onGameplayInteraction?.("bomb");
                 this.dollController.setTrailTheme?.("minus", 0);
             }
@@ -1129,14 +1132,22 @@ export default class InteractionSystem {
             const skyEffect = this.getSkyMultiplierEffect(item);
             const rawLabelAtHit = String(item?.text?.text || "").trim();
             const isMinus = (skyEffect.type === "subtract") || rawLabelAtHit.startsWith("-");
+            if (isMinus) {
+                this.resetCombo();
+            } else {
+                this.addCombo();
+            }
 
             const hitParticleType =
                 skyEffect.type === "multiply" ? "sky_x"
                 : skyEffect.type === "add" ? "sky_plus"
                 : "sky_minus";
 
-            // Enforce: "-1" always behaves like an obstacle hit (downward), regardless of motion config.
-            const impulse = isMinus
+            const timeSinceLaunchMs = Number(this.dollController?.elapsedMs) || 0;
+            const allowImmediateDrop = timeSinceLaunchMs >= 420;
+            // Prevent rare “kick → straight to ground” feeling: in the first ~0.4s after launch,
+            // still apply -1 penalty but do not force a hard drop.
+            const impulse = (isMinus && allowImmediateDrop)
                 ? { ...this.getSkyCollisionImpulse({ ...item, motion: "backward" }), label: "MINUS DROP" }
                 : this.getSkyCollisionImpulse(item);
 
@@ -1257,7 +1268,7 @@ export default class InteractionSystem {
         const cameraRight = cameraLeft + this.scene.scale.width;
 
         // Despawn behind
-        const despawnX = cameraLeft - 420;
+        const despawnX = cameraLeft - 1200;
         for (let i = 0; i < this.proceduralBombs.length; i++) {
             const item = this.proceduralBombs[i];
             if (item.active && item.x < despawnX) {
@@ -1362,7 +1373,7 @@ export default class InteractionSystem {
         const cameraLeft = camera?.scrollX ?? 0;
         const cameraRight = cameraLeft + this.scene.scale.width;
 
-        const despawnX = cameraLeft - 420;
+        const despawnX = cameraLeft - 1200;
         for (let i = 0; i < this.proceduralBats.length; i++) {
             const item = this.proceduralBats[i];
             if (item.active && item.x < despawnX) {
@@ -1642,7 +1653,7 @@ export default class InteractionSystem {
         const cameraLeft = camera?.scrollX ?? 0;
         
         // 1. Despawn far-behind items
-        const despawnX = cameraLeft - 400;
+        const despawnX = cameraLeft - 1200;
         for (let i = 0; i < this.decorationHazards.length; i++) {
             const item = this.decorationHazards[i];
             if (item.active && item.x < despawnX) {
@@ -1743,7 +1754,7 @@ export default class InteractionSystem {
 
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
-        const despawnX = cameraLeft - 220;
+        const despawnX = cameraLeft - 900;
 
         for (let i = 0; i < this.skyMultipliers.length; i++) {
             const item = this.skyMultipliers[i];

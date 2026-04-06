@@ -59,6 +59,8 @@ export default class UIManager {
             if (savedSpeed && GAME_CONFIG.speedModes?.[savedSpeed]) {
                 this.speedMode = savedSpeed;
             }
+            const muted = String(window.localStorage?.getItem("dolvin_muted") || "") === "1";
+            this.scene.audioManager?.setEnabled?.(!muted);
         } catch {
             // ignore storage errors
         }
@@ -67,6 +69,8 @@ export default class UIManager {
     saveUiPrefs() {
         try {
             window.localStorage?.setItem("dolvin_speedMode", String(this.speedMode || "NORMAL"));
+            const muted = !this.scene.audioManager?.isEnabled?.();
+            window.localStorage?.setItem("dolvin_muted", muted ? "1" : "0");
         } catch {
             // ignore storage errors
         }
@@ -77,8 +81,23 @@ export default class UIManager {
         header.className = "game-header";
         header.innerHTML = `
             <div class="logo-text">DOLWIN &amp; BASH</div>
+            <button id="ui-btn-mute" class="mute-btn" title="Mute / Unmute" aria-label="Mute / Unmute" style="margin-left:10px;">🔊</button>
         `;
         this.root.prepend(header);
+
+        const btn = document.getElementById("ui-btn-mute");
+        const sync = () => {
+            const muted = !this.scene.audioManager?.isEnabled?.();
+            if (btn) btn.textContent = muted ? "🔇" : "🔊";
+        };
+        sync();
+        btn?.addEventListener("click", () => {
+            this.playUiClick();
+            const nextMuted = this.scene.audioManager?.isEnabled?.();
+            this.scene.audioManager?.setEnabled?.(!nextMuted);
+            this.saveUiPrefs();
+            sync();
+        });
     }
 
     createBetPanel() {
