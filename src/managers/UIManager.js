@@ -193,7 +193,6 @@ export default class UIManager {
         const overlay = document.createElement("div");
         overlay.className = "result-overlay";
         overlay.id = "ui-result-overlay";
-        overlay.style.pointerEvents = "none"; // Safe default
         overlay.innerHTML = `
             <div class="result-panel glass-panel">
                 <h2 id="ui-result-title" class="result-title">ROUND ENDED</h2>
@@ -235,6 +234,9 @@ export default class UIManager {
                 break;
             case GAME_STATES.RESULT:
                 if (overlay) overlay.classList.add("visible");
+                // Prevent ANY clicks on UI beneath the result overlay.
+                if (betPanel) betPanel.style.pointerEvents = "none";
+                if (betPanel) betPanel.style.opacity = "0.65";
                 this.hudPanel.setVisible(false);
                 break;
         }
