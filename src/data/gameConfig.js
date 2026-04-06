@@ -10,6 +10,7 @@ export const GAME_CONFIG = {
         minBet: 1,
         maxBet: 500,
         baseMultiplier: 1,
+        maxMultiplier: 999,
         travelBonusPer100: 0.02,
         defaultSpeedMode: "NORMAL",
         defaultVolatility: "NORMAL"
@@ -50,8 +51,8 @@ export const GAME_CONFIG = {
         gravity: 1400, // Reduced from 1700 for floatier feel
         launchVelocityX: 490, // Reduced from 620 to feel less "forward heavy"
         launchVelocityY: -760,
-        bounceDamping: 0.48,
-        minBounceVelocity: 140,
+        bounceDamping: 0.26,
+        minBounceVelocity: 190,
         stopVelocityX: 26,
         friction: 0.992,
         rotationSpeed: 5.5,
@@ -229,7 +230,7 @@ export const GAME_CONFIG = {
         impulseX: 420,
         impulseY: -720,
         // Bat hit: harder downward drive and slightly less horizontal → “more straight down”.
-        diveVelocityY: 1480,
+        diveVelocityY: 1220,
         diveVelocityX: 140,
         // Pattern-spawned bats: same HD box as procedural (full source detail, mobile + PC).
         displayWidth: 140,
@@ -271,6 +272,10 @@ export const GAME_CONFIG = {
             gapMax: 1700,
             firstGapAfterRollMin: 480,
             firstGapAfterRollMax: 1040,
+            // Stream behavior: keep some obstacles prefilled ahead so they don't "pop in".
+            fillAheadPx: 2000,
+            fillAheadPxDesktop: 2600,
+            maxSpawnStepsPerFrame: 10,
             // Desktop (ENVELOP / wide): clearer lanes made "nothing" feel like ~1/5 spawns; tune separately from mobile.
             gapMinDesktop: 560,
             gapMaxDesktop: 1180,

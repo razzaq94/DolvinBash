@@ -2,7 +2,8 @@ import { GAME_CONFIG } from "../data/gameConfig.js";
 
 export default class ResultSystem {
     calculate(betAmount, multiplier, hitHazard, maxCombo = 0, travelStats = null) {
-        const safeMultiplier = Number((multiplier ?? 1).toFixed(2));
+        const maxMul = Number(GAME_CONFIG.round?.maxMultiplier ?? 999) || 999;
+        const safeMultiplier = Phaser.Math.Clamp(Number((multiplier ?? 1).toFixed(2)), 1, maxMul);
         const distance = travelStats?.distance ?? 0;
         const airTimeMs = travelStats?.airTimeMs ?? 0;
         const peakHeight = travelStats?.peakHeight ?? 0;
@@ -16,7 +17,7 @@ export default class ResultSystem {
         const airtimeSteps = Math.floor(Math.max(0, airTimeMs) / airtimeStepMs);
         const travelBonusRaw = (distanceSteps * distanceStepMultiplier) + (airtimeSteps * airtimeStepMultiplier);
         const travelBonus = Number(travelBonusRaw.toFixed(2));
-        const finalMultiplier = Number((safeMultiplier + travelBonus).toFixed(2));
+        const finalMultiplier = Phaser.Math.Clamp(Number((safeMultiplier + travelBonus).toFixed(2)), 1, maxMul);
         const payout = hitHazard ? 0 : Math.round(betAmount * finalMultiplier * 100) / 100;
         const netChange = Number((payout - betAmount).toFixed(2));
         const outcome = hitHazard ? "LOSS" : "WIN";

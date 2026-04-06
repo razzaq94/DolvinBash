@@ -107,7 +107,7 @@ export default class InteractionSystem {
                     yOffset,
                     itemData.variant
                 );
-                item.deferredUntilRolling = true;
+                item.deferredUntilRolling = false;
                 this.hazards.push(item);
             } else if (itemData.type === "bat") {
                 item = this.createBatObject(x, y, yOffset, itemData);
@@ -818,8 +818,15 @@ export default class InteractionSystem {
         this.emitMultiplierChanged();
         this.emitComboChanged();
 
-        this.roadObstacleStreamUnlocked = false;
-        this.deactivateRoadCollidersUntilRolling();
+        // Road obstacles should spawn throughout the round (no “wait until rolling” gate).
+        this.roadObstacleStreamUnlocked = true;
+        this.activateDeferredPatternRoadHazards();
+        const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
+        // Stream cursor: start a bit ahead of camera so obstacles are already visible before player reaches them.
+        const camera = this.scene.cameras.main;
+        const cameraRight = (camera?.scrollX ?? 0) + this.scene.scale.width;
+        const runway = streamCfg.firstGapAfterRollMin ?? 480;
+        this.nextHazardSpawnX = cameraRight + runway;
     }
 
     isRoadColliderVariant(variant) {
@@ -1626,31 +1633,24 @@ export default class InteractionSystem {
     maintainHazardStream(dollX) {
         const streamCfg = GAME_CONFIG.encounters?.roadObstacleStream || {};
         const groundY = this.getGroundY();
-        const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
-        const isOnGround = (this.dollController?.position?.y ?? 0) >= (collisionThreshold - 1);
-        const vx = Math.abs(this.dollController?.velocity?.x ?? 0);
-        const minRoll = streamCfg.minRollSpeedX ?? 24;
-        const isRolling = isOnGround && vx > minRoll;
-        if (!isRolling) {
-            return;
-        }
+        // No “rolling” requirement: spawn all round, and keep a prefilled buffer ahead (no pop-in).
 
         if (!this.roadObstacleStreamUnlocked) {
             this.roadObstacleStreamUnlocked = true;
             this.activateDeferredPatternRoadHazards();
+            const camera = this.scene.cameras.main;
+            const cameraRight = (camera?.scrollX ?? 0) + this.scene.scale.width;
             const layout = this.scene.getViewportLayout?.();
             const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
             const gmin = isMobile
                 ? (streamCfg.firstGapAfterRollMin ?? 480)
                 : (streamCfg.firstGapAfterRollMinDesktop ?? streamCfg.firstGapAfterRollMin ?? 480);
-            const gmax = isMobile
-                ? (streamCfg.firstGapAfterRollMax ?? 1040)
-                : (streamCfg.firstGapAfterRollMaxDesktop ?? streamCfg.firstGapAfterRollMax ?? 1040);
-            this.nextHazardSpawnX = dollX + Phaser.Math.Between(gmin, gmax);
+            this.nextHazardSpawnX = cameraRight + gmin;
         }
 
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
+        const cameraRight = cameraLeft + this.scene.scale.width;
         
         // 1. Despawn far-behind items
         const despawnX = cameraLeft - 1200;
@@ -1663,42 +1663,49 @@ export default class InteractionSystem {
             }
         }
 
-        // 2. Procedural spawn tick: weighted hole / cone / barricade / nothing (clear lane).
-        if (dollX < this.nextHazardSpawnX) {
-            return;
-        }
-
-        const kind = this.pickRoadObstacleSpawnKind();
-
-        if (kind !== "nothing") {
-            let candidate = null;
-            for (let i = 0; i < this.decorationHazards.length; i++) {
-                if (!this.decorationHazards[i].active) {
-                    candidate = this.decorationHazards[i];
-                    break;
-                }
-            }
-
-            if (!candidate) {
-                for (let i = 0; i < this.decorationHazards.length; i++) {
-                    const item = this.decorationHazards[i];
-                    if (!candidate || item.x < candidate.x) {
-                        candidate = item;
-                    }
-                }
-            }
-
-            if (candidate) {
-                const spawnX = this.getRoadObstacleSpawnWorldX();
-                this.placeHazardProcedural(candidate, spawnX, kind);
-            }
-        }
-
+        // 2. Spawn ahead: keep a filled buffer to avoid sudden pop-in.
         const layout = this.scene.getViewportLayout?.();
         const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
         const gapMin = isMobile ? (streamCfg.gapMin ?? 760) : (streamCfg.gapMinDesktop ?? streamCfg.gapMin ?? 760);
         const gapMax = isMobile ? (streamCfg.gapMax ?? 1700) : (streamCfg.gapMaxDesktop ?? streamCfg.gapMax ?? 1700);
-        this.nextHazardSpawnX = dollX + Phaser.Math.Between(gapMin, gapMax);
+        const fillAhead = isMobile
+            ? (streamCfg.fillAheadPx ?? 2000)
+            : (streamCfg.fillAheadPxDesktop ?? streamCfg.fillAheadPx ?? 2600);
+        const stepCap = Math.max(2, streamCfg.maxSpawnStepsPerFrame ?? 10);
+        const spawnLimitX = cameraRight + fillAhead;
+
+        let steps = 0;
+        while (this.nextHazardSpawnX < spawnLimitX && steps < stepCap) {
+            steps += 1;
+            const kind = this.pickRoadObstacleSpawnKind();
+
+            if (kind !== "nothing") {
+                let candidate = null;
+                for (let i = 0; i < this.decorationHazards.length; i++) {
+                    if (!this.decorationHazards[i].active) {
+                        candidate = this.decorationHazards[i];
+                        break;
+                    }
+                }
+
+                if (!candidate) {
+                    for (let i = 0; i < this.decorationHazards.length; i++) {
+                        const item = this.decorationHazards[i];
+                        if (!candidate || item.x < candidate.x) {
+                            candidate = item;
+                        }
+                    }
+                }
+
+                if (candidate) {
+                    // Place at the stream cursor (already ahead), not at the edge at the moment of trigger.
+                    const x = this.nextHazardSpawnX + Phaser.Math.Between(-18, 22);
+                    this.placeHazardProcedural(candidate, x, kind);
+                }
+            }
+
+            this.nextHazardSpawnX += Phaser.Math.Between(gapMin, gapMax);
+        }
     }
 
     placeHazardProcedural(item, x, variant) {
