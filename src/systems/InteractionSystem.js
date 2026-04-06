@@ -1022,21 +1022,22 @@ export default class InteractionSystem {
             }
             });
 
-            // Bats: same knockback as bomb, no multiplier / ÷2 / floating number effects; wing animation is visual only.
-            const batMoveSq = (dollX - prevDollX) ** 2 + (dollY - prevDollY) ** 2;
-            const batHit =
-                batMoveSq >= 2.25
-                    ? this.findBestRectHitSwept(
-                        this.bats,
-                        prevDollX,
-                        prevDollY,
-                        dollX,
-                        dollY,
-                        dollWTorso,
-                        dollHTorso,
-                        null
-                    )
-                    : this.findStaticRoadOverlap(this.bats, dollX, dollY, dollWTorso, dollHTorso, null);
+            // Bats: must NEVER miss (mobile low-FPS). Use segmented swept AABB with a forgiving circle-based extent.
+            const skyCfg = GAME_CONFIG.skyMultipliers || {};
+            const maxSeg = skyCfg.maxSweepSegmentPx ?? 46;
+            const batPad = 8;
+            const batHalf = Math.max(8, dollCircleRadius + batPad);
+            const batHit = this.findBestRectHitSweptSegmented(
+                this.bats,
+                prevDollX,
+                prevDollY,
+                dollX,
+                dollY,
+                batHalf,
+                batHalf,
+                null,
+                maxSeg
+            );
             if (batHit && !batHit.hasCollided) {
                 batHit.hasCollided = true;
                 this.resetCombo();
@@ -2742,6 +2743,34 @@ export default class InteractionSystem {
         }
 
         return bestItem;
+    }
+
+    // Prevent "miss" on low-FPS / large delta by splitting the sweep into smaller segments.
+    findBestRectHitSweptSegmented(items, x0, y0, x1, y1, dollHalfW, dollHalfH, filterFn = null, maxSegPx = 46) {
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        const dist = Math.sqrt((dx * dx) + (dy * dy));
+        const seg = Math.max(1, Number(maxSegPx) || 46);
+        const segments = Math.max(1, Math.ceil(dist / seg));
+
+        if (segments === 1) {
+            return this.findBestRectHitSwept(items, x0, y0, x1, y1, dollHalfW, dollHalfH, filterFn);
+        }
+
+        let ax = x0;
+        let ay = y0;
+        for (let i = 0; i < segments; i++) {
+            const t1 = (i + 1) / segments;
+            const bx = x0 + dx * t1;
+            const by = y0 + dy * t1;
+            const hit = this.findBestRectHitSwept(items, ax, ay, bx, by, dollHalfW, dollHalfH, filterFn);
+            if (hit) {
+                return hit;
+            }
+            ax = bx;
+            ay = by;
+        }
+        return null;
     }
 
     consumeObject(item) {
