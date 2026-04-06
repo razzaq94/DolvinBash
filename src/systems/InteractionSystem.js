@@ -905,8 +905,13 @@ export default class InteractionSystem {
 
         const dollX = this.dollController.position.x;
         const dollY = this.dollController.position.y;
-        const prevDollX = (this.prevDollX ?? dollX);
-        const prevDollY = (this.prevDollY ?? dollY);
+        // CRITICAL: InteractionSystem only starts updating when state becomes FLYING.
+        // On the very first frame, prevDollX/Y are null, which would zero the sweep and can miss a bat hit.
+        // Back-project by current velocity to preserve a valid swept segment on that first frame.
+        const vxNow = Number(this.dollController?.velocity?.x) || 0;
+        const vyNow = Number(this.dollController?.velocity?.y) || 0;
+        const prevDollX = (this.prevDollX ?? (dollX - vxNow * deltaSeconds));
+        const prevDollY = (this.prevDollY ?? (dollY - vyNow * deltaSeconds));
         this.maintainSkyMultiplierStream(dollX);
         this.maintainHazardStream(dollX);
         this.maintainBombStream(dollX);
