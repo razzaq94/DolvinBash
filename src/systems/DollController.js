@@ -310,9 +310,16 @@ export default class DollController {
         });
     }
 
+    isMobilePlayLayout() {
+        const layout = this.scene.getViewportLayout?.();
+        if (layout) return !!layout.isMobile;
+        return (this.scene.scale?.width ?? 0) < 900;
+    }
+
     forceDiveDown(direction = 1) {
-        const diveY = GAME_CONFIG.bat?.diveVelocityY ?? 980;
+        const diveYBase = GAME_CONFIG.bat?.diveVelocityY ?? 980;
         const diveX = GAME_CONFIG.bat?.diveVelocityX ?? 260;
+        const diveY = this.isMobilePlayLayout() ? (diveYBase * 0.84) : diveYBase;
         // Force reset so a bat hit ALWAYS drives the doll downward (otherwise Math.min() can keep it rising).
         this.applyImpulse(Math.abs(diveX) * direction, Math.abs(diveY), true);
         this.setExpression("panic");
@@ -417,6 +424,10 @@ export default class DollController {
                     // heat < 1 → gentler slowdown (longer roll); heat > 1 → stronger slowdown (shorter roll).
                     effectiveFriction = 1 + (effectiveFriction - 1) * heat;
                 }
+                if (this.isMobilePlayLayout()) {
+                    // Mobile: stop rolling sooner (shorter sessions feel better on touch).
+                    effectiveFriction = 1 + (effectiveFriction - 1) * 1.22;
+                }
                 this.velocity.x *= effectiveFriction;
                 if (!this.isExpressionLocked()) {
                     this.setExpression("dizzy");
@@ -444,16 +455,17 @@ export default class DollController {
         const collisionThreshold = this.groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isAtRestOnGround = this.position.y >= collisionThreshold - 0.1;
 
+        const isMobile = this.isMobilePlayLayout();
         const vCfg = GAME_CONFIG.doll?.pcDesktopRollVariance || {};
-        const baseStopMs = 980;
+        const baseStopMs = isMobile ? 720 : 980;
         const stopMs = Phaser.Math.Clamp(
             baseStopMs + (this.pcRollStopMsExtra ?? 0),
             vCfg.minGroundedToAllowStop ?? 380,
             vCfg.maxGroundedToAllowStop ?? 3600
         );
         const vxStop = Math.max(
-            4.5,
-            (GAME_CONFIG.doll.stopVelocityX * 0.30) * (this.pcStopVxMul ?? 1)
+            isMobile ? 7.5 : 4.5,
+            (GAME_CONFIG.doll.stopVelocityX * (isMobile ? 0.42 : 0.30)) * (this.pcStopVxMul ?? 1)
         );
 
         const shouldStopByVelocity =
