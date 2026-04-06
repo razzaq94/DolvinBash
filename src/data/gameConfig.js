@@ -55,6 +55,10 @@ export const GAME_CONFIG = {
         minBounceVelocity: 190,
         stopVelocityX: 26,
         friction: 0.992,
+        // Early stop once rolling reaches a "mid" speed band (ends the round sooner).
+        // When grounded and abs(vx) <= midRollStopVelocityX for >= midRollStopMs, we stop and resolve win/loss.
+        midRollStopVelocityX: 60,
+        midRollStopMs: 520,
         rotationSpeed: 5.5,
         collisionYOffsetFromGround: 10, // Visual offset for landing on road
         maxFlightTimeMs: 7000, // Increased from 5000 to allow longer flights

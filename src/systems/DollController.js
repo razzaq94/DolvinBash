@@ -319,7 +319,7 @@ export default class DollController {
     forceDiveDown(direction = 1) {
         const diveYBase = GAME_CONFIG.bat?.diveVelocityY ?? 980;
         const diveX = GAME_CONFIG.bat?.diveVelocityX ?? 260;
-        const diveY = this.isMobilePlayLayout() ? (diveYBase * 0.84) : diveYBase;
+        const diveY = this.isMobilePlayLayout() ? (diveYBase * 0.72) : diveYBase;
         // Force reset so a bat hit ALWAYS drives the doll downward (otherwise Math.min() can keep it rising).
         this.applyImpulse(Math.abs(diveX) * direction, Math.abs(diveY), true);
         this.setExpression("panic");
@@ -379,18 +379,9 @@ export default class DollController {
         this.wasOnGround = isOnGround;
 
         if (isOnGround) {
-            // Rolling animation should not wait until the doll becomes *fully* slow.
-            // Freeze spin mid-way so roll feels snappier (client feedback).
-            const isMobile = this.isMobilePlayLayout();
-            const freezeAfterMs = isMobile ? 420 : 520;
-            const freezeBelowVx = isMobile ? 120 : 95;
-            const freezeSpin = (this.groundedMs >= freezeAfterMs) || (Math.abs(this.velocity.x) <= freezeBelowVx);
-
-            if (!freezeSpin) {
-                // Speed-synced rolling: circumference of visual match travel
-                const rollFactor = 0.22;
-                this.doll.angle += this.velocity.x * rollFactor * 60 * deltaSeconds;
-            }
+            // Speed-synced rolling: circumference of visual match travel
+            const rollFactor = 0.22; 
+            this.doll.angle += this.velocity.x * rollFactor * 60 * deltaSeconds;
         } else {
             // Air trajectory tilt (skip when doing a "Superman" roll)
             if (this.currentExpression === "happy" && this.happySpinRemainingDeg > 0) {
@@ -463,6 +454,7 @@ export default class DollController {
 
         const collisionThreshold = this.groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isAtRestOnGround = this.position.y >= collisionThreshold - 0.1;
+        const isGrounded = this.position.y >= collisionThreshold - 1;
 
         const isMobile = this.isMobilePlayLayout();
         const vCfg = GAME_CONFIG.doll?.pcDesktopRollVariance || {};
@@ -484,10 +476,21 @@ export default class DollController {
             isAtRestOnGround &&
             this.groundedMs >= stopMs;
 
+        const midStopVx = Math.max(10, Number(GAME_CONFIG.doll.midRollStopVelocityX ?? 0) || 0);
+        const midStopMs = Math.max(0, Number(GAME_CONFIG.doll.midRollStopMs ?? 0) || 0);
+        const shouldStopAtMidSpeed =
+            midStopVx > 0 &&
+            midStopMs > 0 &&
+            !this.isFallingInHole &&
+            isGrounded &&
+            this.groundedMs >= midStopMs &&
+            Math.abs(this.velocity.x) <= midStopVx;
+
         // Safety timeout should never end mid-air. Round must resolve after ground contact.
         const shouldStopByTime = this.elapsedMs >= GAME_CONFIG.doll.maxFlightTimeMs;
 
         if (
+            shouldStopAtMidSpeed ||
             shouldStopByVelocity ||
             (!this.isFallingInHole && shouldStopByTime && isAtRestOnGround && this.groundedMs >= stopMs)
         ) {
