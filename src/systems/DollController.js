@@ -593,20 +593,35 @@ export default class DollController {
         // Render the doll just under the hole rim during the cinematic.
         this.doll?.setDepth?.(79);
 
-        // Smooth cinematic: move into hole center then fall down while shrinking.
+        // Mario-style: small "bonk" then drop into the hole while shrinking.
         this.scene.tweens.killTweensOf(this.position);
         const startX = this.position.x;
         const startY = this.position.y;
         const targetX = hx;
         const targetY = this.groundY + 260;
 
+        const bonkUpY = Math.min(startY, (hy - 28));
+        const bonkDur = 160;
+        const fallDur = 820;
+
+        const midX = (startX * 0.35 + targetX * 0.65);
         this.scene.tweens.add({
             targets: this.position,
-            x: { from: startX, to: targetX },
-            y: { from: startY, to: targetY },
-            duration: 900,
-            ease: "Cubic.easeIn",
-            onUpdate: () => this.syncVisuals()
+            x: midX,
+            y: bonkUpY,
+            duration: bonkDur,
+            ease: "Quad.easeOut",
+            onUpdate: () => this.syncVisuals(),
+            onComplete: () => {
+                this.scene.tweens.add({
+                    targets: this.position,
+                    x: targetX,
+                    y: targetY,
+                    duration: fallDur,
+                    ease: "Cubic.easeIn",
+                    onUpdate: () => this.syncVisuals()
+                });
+            }
         });
 
         // Shrink doll while falling for "depth" feel
@@ -614,11 +629,20 @@ export default class DollController {
         const base = this.baseDollScale || 1;
         this.scene.tweens.add({
             targets: this.doll,
-            scaleX: 0,
-            scaleY: 0,
-            alpha: 0,
-            duration: 900,
-            ease: "Cubic.easeIn"
+            scaleX: base * 1.06,
+            scaleY: base * 0.92,
+            duration: bonkDur,
+            ease: "Quad.easeOut",
+            onComplete: () => {
+                this.scene.tweens.add({
+                    targets: this.doll,
+                    scaleX: 0,
+                    scaleY: 0,
+                    alpha: 0,
+                    duration: fallDur,
+                    ease: "Cubic.easeIn"
+                });
+            }
         });
         
         if (this.shadow) {
