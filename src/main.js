@@ -27,7 +27,7 @@ window.addEventListener("load", () => {
         resolution: 1,
         render: {
             antialias: true,
-            roundPixels: true
+            roundPixels: false
         },
         backgroundColor: GAME_CONFIG.backgroundColor,
         scale: {

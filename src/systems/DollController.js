@@ -554,6 +554,9 @@ export default class DollController {
         } catch (_) {}
         this.holeMaskGfx = null;
         this.holeMask = null;
+        const hx = this.holeVisual?.x ?? holeX;
+        const hy = this.holeVisual?.y ?? (this.groundY + 10);
+
         if (this.holeVisual && this.doll) {
             const hx = this.holeVisual.x ?? holeX;
             const hy = this.holeVisual.y ?? (this.groundY + 10);
@@ -561,12 +564,12 @@ export default class DollController {
             const hh = this.holeVisual.displayHeight || this.holeVisual.height || 40;
 
             // Slightly smaller than the visual so edges feel like a "rim".
-            const rx = Math.max(18, (hw * 0.36));
-            const ry = Math.max(10, (hh * 0.22));
+            const rx = Math.max(22, (hw * 0.46));
+            const ry = Math.max(12, (hh * 0.34));
 
             this.holeMaskGfx = this.scene.add.graphics();
             this.holeMaskGfx.fillStyle(0xffffff, 1);
-            this.holeMaskGfx.fillEllipse(hx, hy - (ry * 0.15), rx * 2, ry * 2);
+            this.holeMaskGfx.fillEllipse(hx, hy - (ry * 0.05), rx * 2, ry * 2);
             this.holeMaskGfx.setDepth(79); // just below the hole visual
 
             this.holeMask = this.holeMaskGfx.createGeometryMask();
@@ -575,18 +578,36 @@ export default class DollController {
         
         // Disable horizontal air boost or glide
         this.airBoostTimerMs = 0;
-        
-        // Zero out horizontal speed or snap to hole center for better visual
-        this.velocity.x = (holeX - this.position.x) * 1.5; 
-        this.velocity.y = 350; // Force down into the abyss
-        
+        this.velocity.set(0, 0);
+
+        // Render the doll just under the hole rim during the cinematic.
+        this.doll?.setDepth?.(79);
+
+        // Smooth cinematic: move into hole center then fall down while shrinking.
+        this.scene.tweens.killTweensOf(this.position);
+        const startX = this.position.x;
+        const startY = this.position.y;
+        const targetX = hx;
+        const targetY = this.groundY + 260;
+
+        this.scene.tweens.add({
+            targets: this.position,
+            x: { from: startX, to: targetX },
+            y: { from: startY, to: targetY },
+            duration: 900,
+            ease: "Cubic.easeIn",
+            onUpdate: () => this.syncVisuals()
+        });
+
         // Shrink doll while falling for "depth" feel
+        this.scene.tweens.killTweensOf(this.doll);
+        const base = this.baseDollScale || 1;
         this.scene.tweens.add({
             targets: this.doll,
             scaleX: 0,
             scaleY: 0,
             alpha: 0,
-            duration: 800,
+            duration: 900,
             ease: "Cubic.easeIn"
         });
         
