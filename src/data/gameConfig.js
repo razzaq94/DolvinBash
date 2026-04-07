@@ -38,7 +38,7 @@ export const GAME_CONFIG = {
     roadObstacleColliders: {
         dollHalfWidthFactor: 0.32,
         dollHalfHeightFactor: 0.38,
-        hole: { wFactor: 0.36, hFactor: 0.32 },
+        hole: { wFactor: 0.32, hFactor: 0.28 },
         trafficcone: { wFactor: 0.44, hFactor: 0.5 },
         roadblocker: { wFactor: 0.5, hFactor: 0.44 }
     },
