@@ -113,12 +113,82 @@ export default class PreloadScene extends Phaser.Scene {
         }
     }
 
+    /**
+     * Doll sprites: linear texture filtering for smooth HD scaling (mobile + PC).
+     */
+    applyDollHdTextureSettings() {
+        const keys = [
+            "doll_idle",
+            "doll_surprised",
+            "doll_excited",
+            "doll_determined",
+            "doll_impact",
+            "doll_panic",
+            "doll_dazed",
+            "doll_dizzy",
+            "doll_ko",
+            "doll_win",
+            "doll_loss",
+            "doll_falling",
+            "doll_happy",
+            "doll_happywin",
+            "doll_angry"
+        ];
+        const F = Phaser.Textures?.FilterMode;
+        if (!F) {
+            return;
+        }
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            if (!this.textures.exists(key)) continue;
+            const tex = this.textures.get(key);
+            try {
+                if (typeof tex.setFilter === "function") {
+                    tex.setFilter(F.LINEAR);
+                }
+            } catch (_) {
+                /* ignore */
+            }
+        }
+    }
+
+    /**
+     * Kicker sprites: linear texture filtering for smooth HD scaling (mobile + PC).
+     */
+    applyKickerHdTextureSettings() {
+        const keys = [
+            "kicker_idle",
+            "kicker_ready",
+            "kicker_swing1",
+            "kicker_swing2",
+            "kicker_follow"
+        ];
+        const F = Phaser.Textures?.FilterMode;
+        if (!F) {
+            return;
+        }
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            if (!this.textures.exists(key)) continue;
+            const tex = this.textures.get(key);
+            try {
+                if (typeof tex.setFilter === "function") {
+                    tex.setFilter(F.LINEAR);
+                }
+            } catch (_) {
+                /* ignore */
+            }
+        }
+    }
+
     create() {
         if (GAME_CONFIG.debug.enableLogs) {
             console.log("[PreloadScene] create");
         }
 
         this.applyBatHdTextureSettings();
+        this.applyDollHdTextureSettings();
+        this.applyKickerHdTextureSettings();
         this.load.off("progress");
 
         this.scale.off("resize", this.handleResize, this);

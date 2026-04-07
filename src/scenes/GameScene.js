@@ -127,6 +127,8 @@ export default class GameScene extends Phaser.Scene {
         ).setOrigin(0.5, 1);
 
         this.kicker.setScale(0.42);
+        // HD sprites: allow sub-pixel positioning (render.roundPixels is off globally).
+        this.kicker.setRoundPixels?.(false);
         this.idleTween = null;
         this.startKickerIdle();
 

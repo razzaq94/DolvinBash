@@ -160,7 +160,9 @@ export default class InteractionSystem {
         const cameraRight = (camera?.scrollX ?? 0) + this.scene.scale.width;
         const skyStartX = GAME_CONFIG.skyMultipliers?.startX ?? 520;
         // Always anchor to the *current* camera (do not Math.max with stale world X after replay).
-        this.nextBombSpawnX = Math.max(skyStartX + 120, cameraRight + 260);
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+        this.nextBombSpawnX = Math.max(skyStartX + 120, cameraRight + (isMobile ? 560 : 260));
     }
 
     initBatStream(groundY) {
@@ -994,6 +996,14 @@ export default class InteractionSystem {
 
         // Swept collision for bombs to prevent "miss" at high speed.
         if (!isOnGroundNow) {
+            const graceMs = Number(this.dollController?.launchGraceRemainingMs) || 0;
+            const allowAirHazards = graceMs <= 0;
+            if (!allowAirHazards) {
+                // Keep baseline up to date and skip early hazard hits (prevents rare "kick fail" feeling).
+                this.prevDollX = dollX;
+                this.prevDollY = dollY;
+                return;
+            }
             this.checkCircleCollisionsSwept(this.bombs, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
             const effect = item.effect || { type: "subtract", value: 1 };
             this.resetCombo();

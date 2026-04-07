@@ -72,6 +72,9 @@ export default class DollController {
 
         // Short window after a forced dive (bat hit) where ground bounce should be reduced.
         this.hardDiveRemainingMs = 0;
+
+        // Short grace window right after launch where air hazards should not immediately force a drop.
+        this.launchGraceRemainingMs = 0;
     }
 
     create() {
@@ -86,6 +89,8 @@ export default class DollController {
         this.shadow = this.scene.add.ellipse(startX, groundY + 12, 54, 18, 0x000000, 0.22); // Lowered from +18
         this.shadow.setDepth(25);
         this.doll = this.scene.add.image(startX, startY, "doll_idle").setDepth(36);
+        // HD sprites: allow sub-pixel positioning (render.roundPixels is off globally).
+        this.doll.setRoundPixels?.(false);
         this.computeBaseDollScale();
         this.applyDollScale();
 
@@ -149,6 +154,7 @@ export default class DollController {
         this.pcRollStopMsExtra = 0;
         this.pcStopVxMul = 1;
         this.hardDiveRemainingMs = 0;
+        this.launchGraceRemainingMs = 0;
 
         this.clearTrails();
         this.trailsEnabled = true;
@@ -232,6 +238,7 @@ export default class DollController {
         this.velocity.y = GAME_CONFIG.doll.launchVelocityY * launchYMultiplier;
 
         this.setExpression("determined");
+        this.launchGraceRemainingMs = 320;
     }
 
     sampleDesktopRollVariance() {
@@ -345,6 +352,9 @@ export default class DollController {
         this.expressionLockTimerMs = Math.max(0, this.expressionLockTimerMs - (deltaSeconds * 1000));
         if (this.hardDiveRemainingMs > 0) {
             this.hardDiveRemainingMs = Math.max(0, this.hardDiveRemainingMs - (deltaSeconds * 1000));
+        }
+        if (this.launchGraceRemainingMs > 0) {
+            this.launchGraceRemainingMs = Math.max(0, this.launchGraceRemainingMs - (deltaSeconds * 1000));
         }
         if (this.trailThemeRemainingMs > 0) {
             this.trailThemeRemainingMs = Math.max(0, this.trailThemeRemainingMs - (deltaSeconds * 1000));
