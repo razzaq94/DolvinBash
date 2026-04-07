@@ -51,8 +51,8 @@ export const GAME_CONFIG = {
         gravity: 1400, // Reduced from 1700 for floatier feel
         launchVelocityX: 490, // Reduced from 620 to feel less "forward heavy"
         launchVelocityY: -760,
-        bounceDamping: 0.26,
-        minBounceVelocity: 190,
+        bounceDamping: 0.32,
+        minBounceVelocity: 175,
         stopVelocityX: 26,
         friction: 0.992,
         // Early stop once rolling reaches a "mid" speed band (ends the round sooner).

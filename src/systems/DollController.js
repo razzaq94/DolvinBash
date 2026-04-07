@@ -412,7 +412,7 @@ export default class DollController {
             if (Math.abs(this.velocity.y) > GAME_CONFIG.doll.minBounceVelocity) {
                 const hardDive = this.hardDiveRemainingMs > 0;
                 const damping = hardDive ? 0.18 : GAME_CONFIG.doll.bounceDamping;
-                const reboundCap = hardDive ? 320 : 280;
+                const reboundCap = hardDive ? 320 : 360;
                 this.velocity.y = -Math.min(reboundCap, Math.abs(this.velocity.y) * damping);
                 this.velocity.x *= 0.92;
                 if (!this.isExpressionLocked()) {
