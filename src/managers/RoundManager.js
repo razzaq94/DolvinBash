@@ -115,13 +115,16 @@ export default class RoundManager {
     }
 
     runSequence() {
-        this.pushEvent(this.scene.time.delayedCall(350, () => {
+        const kickStartMs = 350;
+        const hitDelayMs = Math.max(90, Number(GAME_CONFIG.kicker?.hitDelayMs ?? 300));
+
+        this.pushEvent(this.scene.time.delayedCall(kickStartMs, () => {
             this.gameStateManager.setState(GAME_STATES.KICKING, "kick_sequence_begin");
             this.kickerController.playKick();
             this.dollController.startKickReaction();
         }));
 
-        this.pushEvent(this.scene.time.delayedCall(650, () => {
+        this.pushEvent(this.scene.time.delayedCall(kickStartMs + hitDelayMs, () => {
             this.gameStateManager.setState(GAME_STATES.FLYING, "doll_launch");
             this.dollController.launch();
 

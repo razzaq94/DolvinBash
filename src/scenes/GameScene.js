@@ -155,6 +155,18 @@ export default class GameScene extends Phaser.Scene {
                     this.setKickerPose("kicker_swing1");
                     // Sound: Bash/Kick
                     this.audioManager?.play("sfx_kick", { volume: 0.35 });
+                    // Haptics (mobile): subtle vibration on hit.
+                    const vibEnabled = GAME_CONFIG.kicker?.vibrateOnHit !== false;
+                    const vibMs = Math.max(0, Number(GAME_CONFIG.kicker?.vibrateMs ?? 18));
+                    if (vibEnabled && vibMs > 0) {
+                        try {
+                            if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+                                navigator.vibrate(vibMs);
+                            }
+                        } catch (_) {
+                            // ignore (unsupported / blocked)
+                        }
+                    }
                 });
 
                 this.time.delayedCall(135, () => {

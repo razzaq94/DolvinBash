@@ -81,7 +81,12 @@ export const GAME_CONFIG = {
         width: 40,
         height: 100,
         kickMoveX: 22,
-        kickDuration: 140
+        kickDuration: 140,
+        // Apply the actual doll launch a bit before the full swing finishes (snappier impact).
+        hitDelayMs: 220,
+        // Haptics (mobile): vibrate on bat hit.
+        vibrateOnHit: true,
+        vibrateMs: 18
     },
 
     camera: {
