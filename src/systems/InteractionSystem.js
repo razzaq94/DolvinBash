@@ -1020,17 +1020,20 @@ export default class InteractionSystem {
         const groundY = this.getGroundY();
         const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isOnGroundNow = dollY >= (collisionThreshold - 1);
+        const graceMs = Number(this.dollController?.launchGraceRemainingMs) || 0;
+        const allowAirCollectibles = graceMs <= 0;
 
         const dollWTorso = (this.dollController.doll?.displayWidth || 120) * 0.30;
         const dollHTorso = (this.dollController.doll?.displayHeight || 120) * 0.36;
 
         // Resolve circle collisions using swept "best hit" to avoid wrong/missed hits
         // when multiple nodes are close together.
-        const pickupHit = isOnGroundNow
+        const pickupHit = (isOnGroundNow || !allowAirCollectibles)
             ? null
             : this.findBestAirLaneCircleHit(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (pickupHit) {
             const item = pickupHit;
+            this.debugAirHit("pickup", item, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
             const effect = item.effect || { type: "add", value: 1 };
             // Trail color theme (reference): + green, x yellow, - red
             const trailTheme =
@@ -1091,7 +1094,6 @@ export default class InteractionSystem {
 
         // Swept collision for bombs to prevent "miss" at high speed.
         if (!isOnGroundNow) {
-            const graceMs = Number(this.dollController?.launchGraceRemainingMs) || 0;
             const allowAirHazards = graceMs <= 0;
             if (!allowAirHazards) {
                 // Keep baseline up to date and skip early hazard hits (prevents rare "kick fail" feeling).
@@ -1242,11 +1244,12 @@ export default class InteractionSystem {
         let bestImpulse = null;
         let hasDrop = false;
 
-        const skyHit = isOnGroundNow
+        const skyHit = (isOnGroundNow || !allowAirCollectibles)
             ? null
             : this.findBestAirLaneCircleHit(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (skyHit) {
             const item = skyHit;
+            this.debugAirHit("sky", item, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
             // CRITICAL: snapshot effect/label/pos BEFORE recycling (recycle mutates text + savedEffect).
             const hitX = item.x;
             const hitY = item.y;
