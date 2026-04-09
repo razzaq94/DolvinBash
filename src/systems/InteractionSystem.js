@@ -914,7 +914,9 @@ export default class InteractionSystem {
         const vyNow = Number(this.dollController?.velocity?.y) || 0;
         const prevDollX = (this.prevDollX ?? (dollX - vxNow * deltaSeconds));
         const prevDollY = (this.prevDollY ?? (dollY - vyNow * deltaSeconds));
-        this.maintainSkyMultiplierStream(dollX);
+        // Sky stream recycle TELEPORTS pooled nodes. If that runs before collision, the swept test
+        // uses prev→current doll motion against NEW positions the player never saw (phantom -1 hits).
+        // Maintain sky numbers only after this frame's collisions (see end of update + launch-grace early return).
         this.maintainHazardStream(dollX);
         this.maintainBombStream(dollX);
         this.maintainBatStream(dollX);
@@ -1002,6 +1004,7 @@ export default class InteractionSystem {
                 // Keep baseline up to date and skip early hazard hits (prevents rare "kick fail" feeling).
                 this.prevDollX = dollX;
                 this.prevDollY = dollY;
+                this.maintainSkyMultiplierStream(dollX);
                 return;
             }
             this.checkCircleCollisionsSwept(this.bombs, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
@@ -1236,9 +1239,10 @@ export default class InteractionSystem {
             this.dollController.applyImpulse(bestImpulse.x, bestImpulse.y, forceReset);
         }
 
-        // Update swept collision baseline
+        // Update swept collision baseline, then repopulate sky stream for *next* frame.
         this.prevDollX = dollX;
         this.prevDollY = dollY;
+        this.maintainSkyMultiplierStream(dollX);
     }
 
     isDesktopProceduralAirThreat() {
@@ -1967,6 +1971,19 @@ export default class InteractionSystem {
             if (overlapX && overlapY) {
                 return false;
             }
+
+            // Circle spacing must match gameplay hits: AABB alone can allow two centers close enough
+            // that the doll sweeps through a hidden -1 stacked near a +1 / x node.
+            const rItem = this.getCircleItemHitRadius(item);
+            const rCand = this.getCircleItemHitRadius({
+                type: "sky_multiplier",
+                hitRadius: cfg.hitRadius,
+                radius: nodeRadius
+            });
+            const minCenterDist = rItem + rCand + Math.max(8, this.getStrictAirThreatGap() * 0.5);
+            if (Math.hypot(dx, dy) < minCenterDist) {
+                return false;
+            }
         }
 
         for (let i = 0; i < this.bats.length; i++) {
@@ -2048,7 +2065,7 @@ export default class InteractionSystem {
             return { type: "add", value: item.bonus };
         }
 
-        if (item.penalty > 0 || rawLabel.includes("drop") || rawLabel.includes("-")) {
+        if (item.penalty > 0 || rawLabel.includes("drop")) {
             const val = item.penalty || 1;
             return { type: "subtract", value: val };
         }
