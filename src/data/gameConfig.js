@@ -45,7 +45,7 @@ export const GAME_CONFIG = {
 
     doll: {
         startX: 175,
-        startYOffsetFromGround: 92, // Raised to hand/bat level
+        startYOffsetFromGround: 105,// Slightly higher start position
         width: 120,
         height: 120,
         gravity: 1400, // Reduced from 1700 for floatier feel
