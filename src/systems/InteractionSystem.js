@@ -38,10 +38,101 @@ export default class InteractionSystem {
         this.nextBatSpawnX = 900;
         this.prevDollX = null;
         this.prevDollY = null;
+
+        // Debug overlay/logging for air-lane (+1/x/-1) hits.
+        this.airHitDebugGfx = null;
     }
 
     create() {
         this.reset();
+    }
+
+    getAirHitDebugCfg() {
+        return GAME_CONFIG.debug?.airHitDebug || {};
+    }
+
+    ensureAirHitDebugGfx() {
+        if (this.airHitDebugGfx) return this.airHitDebugGfx;
+        this.airHitDebugGfx = this.scene.add.graphics();
+        this.airHitDebugGfx.setDepth(9999);
+        this.airHitDebugGfx.setScrollFactor(1, 1);
+        return this.airHitDebugGfx;
+    }
+
+    clearAirHitDebugOverlay() {
+        if (this.airHitDebugGfx) this.airHitDebugGfx.clear();
+    }
+
+    isAirHitSuspicious(item) {
+        const cfg = this.getAirHitDebugCfg();
+        const alphaTh = Number(cfg.suspiciousAlphaThreshold ?? 0.05);
+        const text = item?.text;
+        if (!text) return true;
+        if (!text.visible) return true;
+        if ((Number(text.alpha) || 0) <= alphaTh) return true;
+
+        const cam = this.scene.cameras?.main;
+        if (!cam) return false;
+        const b = text.getBounds?.();
+        if (!b) return false;
+        const rect = new Phaser.Geom.Rectangle(b.x, b.y, b.width, b.height);
+        return !Phaser.Geom.Intersects.RectangleToRectangle(cam.worldView, rect);
+    }
+
+    debugAirHit(kind, item, prevX, prevY, hitX, hitY, dollRadius) {
+        const cfg = this.getAirHitDebugCfg();
+        if (!cfg?.enabled) return;
+
+        const suspicious = this.isAirHitSuspicious(item);
+        const cam = this.scene.cameras?.main;
+        const view = cam?.worldView;
+        const text = item?.text;
+        const b = text?.getBounds?.();
+
+        if (cfg.logToConsole) {
+            const payload = {
+                kind,
+                label: String(text?.text || "").trim(),
+                itemType: item?.type,
+                itemVariant: item?.variant,
+                suspicious,
+                doll: { prevX, prevY, hitX, hitY, r: dollRadius },
+                item: {
+                    x: item?.x,
+                    y: item?.y,
+                    textX: text?.x,
+                    textY: text?.y,
+                    visible: !!text?.visible,
+                    alpha: Number(text?.alpha ?? 1)
+                },
+                bounds: b ? { x: b.x, y: b.y, w: b.width, h: b.height } : null,
+                camera: cam ? { x: cam.scrollX, y: cam.scrollY, w: cam.width, h: cam.height } : null,
+                view: view ? { x: view.x, y: view.y, w: view.width, h: view.height } : null
+            };
+            console.log("[AirHitDebug]", payload);
+        }
+
+        if (cfg.drawOverlay) {
+            const g = this.ensureAirHitDebugGfx();
+            g.clear();
+            g.lineStyle(3, suspicious ? 0xff0000 : 0x22c55e, 0.95);
+            g.strokeCircle(hitX, hitY, Math.max(6, Number(dollRadius) || 18));
+            g.lineStyle(2, 0x60a5fa, 0.75);
+            g.strokeCircle(prevX, prevY, 6);
+            g.lineBetween(prevX, prevY, hitX, hitY);
+            if (b) {
+                g.lineStyle(3, 0xfacc15, 0.95);
+                g.strokeRect(b.x, b.y, b.width, b.height);
+            }
+            if (view) {
+                g.lineStyle(2, 0xffffff, 0.35);
+                g.strokeRect(view.x, view.y, view.width, view.height);
+            }
+        }
+
+        if (cfg.pauseOnSuspiciousHit && suspicious) {
+            this.scene.gameStateManager?.pause?.("debug_air_hit");
+        }
     }
 
     loadPattern(pattern) {
@@ -935,7 +1026,9 @@ export default class InteractionSystem {
 
         // Resolve circle collisions using swept "best hit" to avoid wrong/missed hits
         // when multiple nodes are close together.
-        const pickupHit = isOnGroundNow ? null : this.findBestCircleHitSwept(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+        const pickupHit = isOnGroundNow
+            ? null
+            : this.findBestAirLaneCircleHit(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (pickupHit) {
             const item = pickupHit;
             const effect = item.effect || { type: "add", value: 1 };
@@ -1149,7 +1242,9 @@ export default class InteractionSystem {
         let bestImpulse = null;
         let hasDrop = false;
 
-        const skyHit = isOnGroundNow ? null : this.findBestCircleHitSwept(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+        const skyHit = isOnGroundNow
+            ? null
+            : this.findBestAirLaneCircleHit(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (skyHit) {
             const item = skyHit;
             // CRITICAL: snapshot effect/label/pos BEFORE recycling (recycle mutates text + savedEffect).
@@ -2415,6 +2510,15 @@ export default class InteractionSystem {
         return this.applyDesktopCircleHitTweak(item, mobileTweaked);
     }
 
+    /** Keep logical item position aligned with the rendered Text (single source of truth for hits). */
+    syncAirLaneTextWorld(item) {
+        if (!item?.text) {
+            return;
+        }
+        item.x = item.text.x;
+        item.y = item.text.y;
+    }
+
     addCombo() {
         if (!GAME_CONFIG.combo.enabled) {
             return;
@@ -2491,68 +2595,84 @@ export default class InteractionSystem {
         }
     }
 
-    findBestCircleHitSwept(items, prevX, prevY, nextX, nextY, dollRadius) {
-        const skyCfg = GAME_CONFIG.skyMultipliers || {};
-        const maxSeg = skyCfg.maxSweepSegmentPx ?? 46;
+    /**
+     * Air-lane pickups + sky multipliers: discrete samples along prev→current.
+     * Hits use Phaser Text world getBounds() vs doll circle only — no extra “node hit radius”
+     * (that was larger than the painted glyph and caused client-side ghost +1/−1 hits while falling).
+     */
+    findBestAirLaneCircleHit(items, prevX, prevY, nextX, nextY, dollRadius) {
         const dx = nextX - prevX;
         const dy = nextY - prevY;
-        const len = Math.sqrt((dx * dx) + (dy * dy));
-        const steps = len <= maxSeg || len < 1e-6 ? 1 : Math.ceil(len / maxSeg);
+        const lenSq = (dx * dx) + (dy * dy);
+        const dr = Math.max(10, Number(dollRadius) || 18);
 
-        let bestItem = null;
-        let bestDist = Infinity;
-        let bestGlobalT = Infinity;
+        const dbg = this.getAirHitDebugCfg();
+        const alphaTh = Number(dbg?.suspiciousAlphaThreshold ?? 0.05);
+        const cam = this.scene.cameras?.main;
+        const view = cam?.worldView;
+        const viewPad = 46; // allow slight pre-hit at edges but never off-screen
+        const viewRect = view
+            ? new Phaser.Geom.Rectangle(view.x - viewPad, view.y - viewPad, view.width + viewPad * 2, view.height + viewPad * 2)
+            : null;
 
-        for (let s = 0; s < steps; s++) {
-            const u0 = s / steps;
-            const u1 = (s + 1) / steps;
-            const ax = prevX + dx * u0;
-            const ay = prevY + dy * u0;
-            const bx = prevX + dx * u1;
-            const by = prevY + dy * u1;
-            const abx = bx - ax;
-            const aby = by - ay;
-            const abLenSq = (abx * abx) + (aby * aby);
-
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                if (!item?.active) continue;
-
-                const r = (dollRadius + this.getCircleItemHitRadius(item));
-                const px = item.x;
-                const py = item.y;
-
-                if (abLenSq <= 0.000001) {
-                    const dist = Phaser.Math.Distance.Between(bx, by, px, py);
-                    const gT = u1;
-                    if (dist <= r && (gT < bestGlobalT - 1e-6 || (Math.abs(gT - bestGlobalT) <= 1e-6 && dist < bestDist))) {
-                        bestDist = dist;
-                        bestGlobalT = gT;
-                        bestItem = item;
-                    }
+        const cached = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item?.active || !item.text) {
+                continue;
+            }
+            this.syncAirLaneTextWorld(item);
+            // HARD RULE: air-lane hits must be visible.
+            if (!item.text.visible) continue;
+            if ((Number(item.text.alpha) || 0) <= alphaTh) continue;
+            const b = item.text.getBounds();
+            if (!b || b.width <= 1 || b.height <= 1) {
+                continue;
+            }
+            if (viewRect) {
+                const br = new Phaser.Geom.Rectangle(b.x, b.y, b.width, b.height);
+                if (!Phaser.Geom.Intersects.RectangleToRectangle(viewRect, br)) {
                     continue;
                 }
+            }
+            const rect = new Phaser.Geom.Rectangle(b.x, b.y, b.width, b.height);
+            const cx = b.x + b.width * 0.5;
+            const cy = b.y + b.height * 0.5;
+            cached.push({ item, rect, cx, cy });
+        }
 
-                const apx = px - ax;
-                const apy = py - ay;
-                let t = ((apx * abx) + (apy * aby)) / abLenSq;
-                t = Phaser.Math.Clamp(t, 0, 1);
-                const cx = ax + (abx * t);
-                const cy = ay + (aby * t);
-                const dist = Phaser.Math.Distance.Between(cx, cy, px, py);
+        let bestItem = null;
+        let bestT = Infinity;
+        let bestDist = Infinity;
 
-                if (dist <= r) {
-                    const globalT = u0 + (u1 - u0) * t;
-                    if (
-                        globalT < bestGlobalT - 1e-6 ||
-                        (Math.abs(globalT - bestGlobalT) <= 1e-6 && dist < bestDist - 0.001)
-                    ) {
-                        bestDist = dist;
-                        bestGlobalT = globalT;
-                        bestItem = item;
-                    }
+        const consider = (sx, sy, t) => {
+            const circle = new Phaser.Geom.Circle(sx, sy, dr);
+            for (let j = 0; j < cached.length; j++) {
+                const { item, rect, cx, cy } = cached[j];
+                if (!Phaser.Geom.Intersects.CircleToRectangle(circle, rect)) {
+                    continue;
+                }
+                const d = Phaser.Math.Distance.Between(sx, sy, cx, cy);
+                if (t < bestT - 1e-9 || (Math.abs(t - bestT) <= 1e-9 && d < bestDist - 0.001)) {
+                    bestT = t;
+                    bestDist = d;
+                    bestItem = item;
                 }
             }
+        };
+
+        if (lenSq <= 1e-6) {
+            consider(nextX, nextY, 1);
+            return bestItem;
+        }
+
+        const len = Math.sqrt(lenSq);
+        const sampleSpan = Math.max(4, Math.min(11, dr * 0.88));
+        const n = Math.min(140, Math.max(1, Math.ceil(len / sampleSpan)));
+
+        for (let k = 0; k <= n; k++) {
+            const t = k / n;
+            consider(prevX + dx * t, prevY + dy * t, t);
         }
 
         return bestItem;
