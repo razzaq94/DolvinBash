@@ -224,7 +224,6 @@ export default class UIManager {
             "ui-btn-speed",
             "ui-btn-autoplay",
             "ui-btn-play",
-            "ui-btn-mute",
             "ui-bet"
         ];
         ids.forEach((id) => {
@@ -236,6 +235,13 @@ export default class UIManager {
             el.style.pointerEvents = enabled ? "auto" : "none";
             el.style.opacity = enabled ? "" : "0.6";
         });
+        // Volume button should always stay interactable.
+        const muteBtn = document.getElementById("ui-btn-mute");
+        if (muteBtn) {
+            muteBtn.style.pointerEvents = "auto";
+            muteBtn.style.opacity = "";
+            if ("disabled" in muteBtn) muteBtn.disabled = false;
+        }
     }
 
     updateByState(state) {
