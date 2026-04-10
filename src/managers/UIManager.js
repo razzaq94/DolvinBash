@@ -217,22 +217,52 @@ export default class UIManager {
         this.onReplay = () => roundManager.replay();
     }
 
+    setPrePlayControlsEnabled(enabled) {
+        const ids = [
+            "ui-btn-minus",
+            "ui-btn-plus",
+            "ui-btn-speed",
+            "ui-btn-autoplay",
+            "ui-btn-play",
+            "ui-btn-mute",
+            "ui-bet"
+        ];
+        ids.forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if ("disabled" in el) {
+                el.disabled = !enabled;
+            }
+            el.style.pointerEvents = enabled ? "auto" : "none";
+            el.style.opacity = enabled ? "" : "0.6";
+        });
+    }
+
     updateByState(state) {
         const betPanel = document.getElementById("ui-bet-panel");
         const overlay = document.getElementById("ui-result-overlay");
 
         switch (state) {
             case GAME_STATES.BETTING:
+                this.setPrePlayControlsEnabled(true);
                 if (betPanel) betPanel.style.opacity = "1";
                 if (betPanel) betPanel.style.pointerEvents = "auto";
                 if (overlay) overlay.classList.remove("visible");
                 this.hudPanel.setVisible(false);
                 break;
             case GAME_STATES.FLYING:
+                this.setPrePlayControlsEnabled(false);
                 this.hudPanel.setVisible(true);
                 if (betPanel) betPanel.style.pointerEvents = "none";
                 break;
+            case GAME_STATES.KICKING:
+            case GAME_STATES.ROUND_END:
+                this.setPrePlayControlsEnabled(false);
+                if (betPanel) betPanel.style.pointerEvents = "none";
+                this.hudPanel.setVisible(true);
+                break;
             case GAME_STATES.RESULT:
+                this.setPrePlayControlsEnabled(false);
                 if (overlay) overlay.classList.add("visible");
                 // Prevent ANY clicks on UI beneath the result overlay.
                 if (betPanel) betPanel.style.pointerEvents = "none";

@@ -723,8 +723,10 @@ export default class InteractionSystem {
             return;
         }
 
-        const minCount = Math.max(1, cfg.minCount ?? 5);
-        const maxCount = Math.max(minCount, cfg.maxCount ?? 8);
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+        const minCount = Math.max(1, isMobile ? (cfg.minCount ?? 5) : (cfg.minCountDesktop ?? cfg.minCount ?? 5));
+        const maxCount = Math.max(minCount, isMobile ? (cfg.maxCount ?? 8) : (cfg.maxCountDesktop ?? cfg.maxCount ?? 8));
         const count = Phaser.Math.Between(minCount, maxCount);
         const startX = cfg.startX ?? 520;
         const stepX = 36;
@@ -920,6 +922,173 @@ export default class InteractionSystem {
         const cameraRight = (camera?.scrollX ?? 0) + this.scene.scale.width;
         const runway = streamCfg.firstGapAfterRollMin ?? 480;
         this.nextHazardSpawnX = cameraRight + runway;
+
+        // Pre-fill sky numbers from current screen into next screen before movement starts.
+        // This prevents the recurring first-travel empty gap on PC.
+        this.prefillSkyFirstAndNextScreen();
+    }
+
+    prefillSkyFirstAndNextScreen() {
+        if (!this.skyMultipliers.length) return;
+
+        const camera = this.scene.cameras.main;
+        const cameraLeft = camera?.scrollX ?? 0;
+        const width = this.scene.scale?.width ?? 1280;
+        const cameraRight = cameraLeft + width;
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? width < 900;
+
+        // Dense deterministic fill for first→next screen handoff (client critical path).
+        const slotSize = isMobile ? 210 : 120;
+        const skyCfg = GAME_CONFIG.skyMultipliers || {};
+        const startAhead = isMobile
+            ? (skyCfg.prefillStartAheadPx ?? 120)
+            : (skyCfg.prefillStartAheadPxDesktop ?? skyCfg.prefillStartAheadPx ?? 180);
+        const coverMinX = cameraLeft + Math.max(0, startAhead);
+        const coverMaxX = cameraRight + width; // full current + full next screen
+        const slotHitRadius = slotSize * 0.38;
+        const cfg = GAME_CONFIG.skyMultipliers || {};
+        const groundY = this.getGroundY();
+        const dollX = this.dollController?.position?.x ?? cameraLeft;
+
+        // Keep stream cursor near the prefilled window so next recycles continue seamlessly.
+        this.nextSkySpawnX = Math.max(this.nextSkySpawnX, cameraRight + 140);
+
+        const pickFarthestActive = (targetX) => {
+            let best = null;
+            let bestDist = -1;
+            for (let i = 0; i < this.skyMultipliers.length; i++) {
+                const it = this.skyMultipliers[i];
+                if (!it?.active) continue;
+                const d = Math.abs((it.x ?? 0) - targetX);
+                if (d > bestDist) {
+                    bestDist = d;
+                    best = it;
+                }
+            }
+            return best;
+        };
+
+        for (let sx = coverMinX; sx <= coverMaxX; sx += slotSize) {
+            let occupied = false;
+            for (let i = 0; i < this.skyMultipliers.length; i++) {
+                const it = this.skyMultipliers[i];
+                if (!it?.active) continue;
+                if (Math.abs(it.x - sx) <= slotHitRadius) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (occupied) continue;
+
+            const candidate = pickFarthestActive(sx);
+            if (!candidate) break;
+
+            // Re-roll node type/effects then pin to slot X.
+            this.recycleSkyMultiplier(candidate, dollX, sx);
+
+            let placed = false;
+            for (let a = 0; a < 24; a++) {
+                const yOffset = this.getRandomSkyYOffset(cfg);
+                const y = groundY + yOffset;
+                if (!this.isSkyPositionFree(sx, y, candidate)) continue;
+                candidate.x = sx;
+                candidate.yOffset = yOffset;
+                candidate.y = y;
+                candidate.shape?.setPosition(candidate.x, candidate.y);
+                candidate.glow?.setPosition(candidate.x, candidate.y);
+                candidate.text?.setPosition(candidate.x, candidate.y);
+                placed = true;
+                break;
+            }
+
+            if (!placed) {
+                // Last resort: keep deterministic X coverage even if Y had no perfect free slot.
+                candidate.x = sx;
+                candidate.shape?.setX(candidate.x);
+                candidate.glow?.setX(candidate.x);
+                candidate.text?.setX(candidate.x);
+            }
+        }
+    }
+
+    placeSkyCandidateAtX(candidate, targetX, dollX = 0) {
+        if (!candidate) return;
+        const cfg = GAME_CONFIG.skyMultipliers || {};
+        const groundY = this.getGroundY();
+        this.recycleSkyMultiplier(candidate, dollX, targetX);
+
+        let placed = false;
+        for (let a = 0; a < 24; a++) {
+            const yOffset = this.getRandomSkyYOffset(cfg);
+            const y = groundY + yOffset;
+            if (!this.isSkyPositionFree(targetX, y, candidate)) continue;
+            candidate.x = targetX;
+            candidate.yOffset = yOffset;
+            candidate.y = y;
+            candidate.shape?.setPosition(candidate.x, candidate.y);
+            candidate.glow?.setPosition(candidate.x, candidate.y);
+            candidate.text?.setPosition(candidate.x, candidate.y);
+            placed = true;
+            break;
+        }
+
+        if (!placed) {
+            // Keep deterministic X coverage as hard requirement.
+            candidate.x = targetX;
+            candidate.shape?.setX(candidate.x);
+            candidate.glow?.setX(candidate.x);
+            candidate.text?.setX(candidate.x);
+        }
+    }
+
+    enforceSkyContinuousCoverage(dollX = 0) {
+        if (!this.skyMultipliers.length) return;
+
+        const camera = this.scene.cameras.main;
+        const cameraLeft = camera?.scrollX ?? 0;
+        const width = this.scene.scale?.width ?? 1280;
+        const cameraRight = cameraLeft + width;
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? width < 900;
+
+        // Continuous filled belt: visible screen + strong ahead buffer.
+        const coverMinX = cameraLeft - (isMobile ? 20 : 40);
+        const coverMaxX = cameraRight + (isMobile ? 1500 : 2600);
+        const slotSize = isMobile ? 125 : 82;
+        const slotHitRadius = slotSize * 0.42;
+
+        const pickFarthestActive = (targetX) => {
+            let best = null;
+            let bestDist = -1;
+            for (let i = 0; i < this.skyMultipliers.length; i++) {
+                const it = this.skyMultipliers[i];
+                if (!it?.active) continue;
+                const d = Math.abs((it.x ?? 0) - targetX);
+                if (d > bestDist) {
+                    bestDist = d;
+                    best = it;
+                }
+            }
+            return best;
+        };
+
+        for (let sx = coverMinX; sx <= coverMaxX; sx += slotSize) {
+            let occupied = false;
+            for (let i = 0; i < this.skyMultipliers.length; i++) {
+                const it = this.skyMultipliers[i];
+                if (!it?.active) continue;
+                if (Math.abs(it.x - sx) <= slotHitRadius) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (occupied) continue;
+
+            const candidate = pickFarthestActive(sx);
+            if (!candidate) break;
+            this.placeSkyCandidateAtX(candidate, Math.round(sx), dollX);
+        }
     }
 
     isRoadColliderVariant(variant) {
@@ -1659,7 +1828,7 @@ export default class InteractionSystem {
         return { x: nextX, y: nextY, label };
     }
 
-    recycleSkyMultiplier(item, dollX = 0) {
+    recycleSkyMultiplier(item, dollX = 0, preferredBaseX = null) {
         const cfg = GAME_CONFIG.skyMultipliers;
         if (!cfg?.enabled || !item || !item.shape || !item.text) {
             return;
@@ -1667,14 +1836,25 @@ export default class InteractionSystem {
 
         const camera = this.scene.cameras.main;
         const cameraRight = (camera?.scrollX ?? 0) + this.scene.scale.width;
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+        const maxLeadFromCamera = isMobile ? 1100 : 1450;
+        const clampedCursor = Math.min(this.nextSkySpawnX, cameraRight + maxLeadFromCamera);
 
-        // Use a queue system: always spawn ahead of the current furthest point
-        const spawnBase = Math.max(this.nextSkySpawnX, cameraRight + 120);
+        // Use a queue system, but allow targeted refill points for desktop gap-fix.
+        const spawnBase = (typeof preferredBaseX === "number")
+            ? preferredBaseX
+            : Math.max(clampedCursor, cameraRight + 120);
         const stepX = this.getRandomSkyGap(cfg);
         const spawn = this.findSkySpawnAroundBase(spawnBase + stepX, cfg, item);
         const nextX = spawn.x;
         const nextYOffset = spawn.yOffset;
-        this.nextSkySpawnX = nextX + Phaser.Math.Between(6, 26);
+        if (typeof preferredBaseX === "number") {
+            // Never move the stream cursor backward when we are just patch-filling a gap.
+            this.nextSkySpawnX = Math.max(this.nextSkySpawnX, nextX + Phaser.Math.Between(6, 26));
+        } else {
+            this.nextSkySpawnX = nextX + Phaser.Math.Between(6, 26);
+        }
 
         const groundY = this.getGroundY();
         const nodeCfg = this.pickSkyNodeConfig(cfg.pool);
@@ -1879,6 +2059,7 @@ export default class InteractionSystem {
 
         const camera = this.scene.cameras.main;
         const cameraLeft = camera?.scrollX ?? 0;
+        const cameraRight = cameraLeft + (this.scene.scale?.width ?? 1280);
         const despawnX = cameraLeft - 900;
 
         for (let i = 0; i < this.skyMultipliers.length; i++) {
@@ -1891,8 +2072,19 @@ export default class InteractionSystem {
         }
 
         // Keep a random but continuous stream ahead.
-        const nearAheadMinX = dollX - 140;
-        const nearAheadMaxX = dollX + 760;
+        // PC needs a wider look-ahead window (camera is wider + doll travels fast), otherwise gaps appear.
+        const layout = this.scene.getViewportLayout?.();
+        const isMobile = layout?.isMobile ?? (this.scene.scale?.width ?? 0) < 900;
+        // Guardrail: prevent stream cursor from drifting too far ahead (causes repeat empty bands).
+        const maxLeadFromCamera = isMobile ? 1200 : 1500;
+        const minLeadFromCamera = 160;
+        this.nextSkySpawnX = Phaser.Math.Clamp(
+            this.nextSkySpawnX,
+            cameraRight + minLeadFromCamera,
+            cameraRight + maxLeadFromCamera
+        );
+        const nearAheadMinX = cameraLeft - 120;
+        const nearAheadMaxX = isMobile ? (cameraRight + 860) : (cameraRight + 1500);
         let aheadCount = 0;
 
         for (let i = 0; i < this.skyMultipliers.length; i++) {
@@ -1903,30 +2095,95 @@ export default class InteractionSystem {
             }
         }
 
-        const requiredAhead = 6;
+        const requiredAhead = isMobile ? 7 : 12;
         if (aheadCount >= requiredAhead) {
             return;
         }
 
-        const needed = requiredAhead - aheadCount;
-        for (let n = 0; n < needed; n++) {
-            let bestCandidate = null;
+        const pickRecycleCandidate = () => {
+            let candidate = null;
             for (let i = 0; i < this.skyMultipliers.length; i++) {
                 const item = this.skyMultipliers[i];
                 if (!item?.active) continue;
                 if (item.x < nearAheadMinX) {
-                    if (!bestCandidate || item.x < bestCandidate.x) {
-                        bestCandidate = item;
-                    }
+                    if (!candidate || item.x < candidate.x) candidate = item;
                 }
             }
+            if (candidate) return candidate;
+            for (let i = 0; i < this.skyMultipliers.length; i++) {
+                const item = this.skyMultipliers[i];
+                if (!item?.active) continue;
+                if (item.x > nearAheadMaxX + 260) {
+                    if (!candidate || item.x > candidate.x) candidate = item;
+                }
+            }
+            return candidate;
+        };
 
+        const needed = requiredAhead - aheadCount;
+        for (let n = 0; n < needed; n++) {
+            const bestCandidate = pickRecycleCandidate();
             if (!bestCandidate) {
                 break;
             }
-
-            this.recycleSkyMultiplier(bestCandidate, dollX);
+            const targetBase = Phaser.Math.Between(
+                Math.round(nearAheadMinX + 120),
+                Math.round(nearAheadMaxX - 80)
+            );
+            this.recycleSkyMultiplier(bestCandidate, dollX, targetBase);
         }
+
+        // Extra desktop pass: iteratively close large X-gaps in the visible-ahead window.
+        // One-pass fill was not enough when a single jump created a very large void.
+        const maxGap = isMobile ? 340 : 240;
+        const fillBudget = isMobile ? 2 : 5;
+        for (let pass = 0; pass < fillBudget; pass++) {
+            const ahead = [];
+            for (let i = 0; i < this.skyMultipliers.length; i++) {
+                const item = this.skyMultipliers[i];
+                if (!item?.active) continue;
+                if (item.x >= nearAheadMinX && item.x <= nearAheadMaxX) {
+                    ahead.push(item);
+                }
+            }
+            ahead.sort((a, b) => a.x - b.x);
+
+            let cursorX = nearAheadMinX;
+            let largestGapStart = nearAheadMinX;
+            let largestGapEnd = nearAheadMaxX;
+            let largestGap = largestGapEnd - largestGapStart;
+
+            for (let i = 0; i < ahead.length; i++) {
+                const curX = ahead[i].x;
+                const g = curX - cursorX;
+                if (g > largestGap) {
+                    largestGap = g;
+                    largestGapStart = cursorX;
+                    largestGapEnd = curX;
+                }
+                cursorX = curX;
+            }
+            const tailGap = nearAheadMaxX - cursorX;
+            if (tailGap > largestGap) {
+                largestGap = tailGap;
+                largestGapStart = cursorX;
+                largestGapEnd = nearAheadMaxX;
+            }
+
+            if (largestGap <= maxGap) {
+                break;
+            }
+
+            const candidate = pickRecycleCandidate();
+            if (!candidate) break;
+
+            // Drop near center of largest gap so each pass halves worst-case emptiness quickly.
+            const targetBase = Math.round((largestGapStart + largestGapEnd) * 0.5);
+            this.recycleSkyMultiplier(candidate, dollX, targetBase);
+        }
+
+        // Absolute requirement: keep sky continuously filled (no gaps).
+        this.enforceSkyContinuousCoverage(dollX);
     }
 
     findRandomSkySpawnPosition(range, excludeItem = null) {

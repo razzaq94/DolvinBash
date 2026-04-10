@@ -58,6 +58,7 @@ export default class DollController {
         this.scoreHistory = [];
         this.maxScoreItems = 6;
         this.scoreContainer = null;
+        this.scoreOverlayDepthOffset = 28;
         this.idleFloatingTween = null;
         this.slideSound = null;
         this.isFallingInHole = false;
@@ -116,7 +117,7 @@ export default class DollController {
         this.happySpinRemainingDeg = 0;
         this.wasOnGround = false;
 
-        this.scoreContainer = this.scene.add.container(startX, startY).setDepth(45);
+        this.scoreContainer = this.scene.add.container(startX, startY).setDepth(this.doll.depth + this.scoreOverlayDepthOffset);
         this.scoreHistory = [];
         this.currentValueText = null;
 
@@ -918,6 +919,10 @@ export default class DollController {
         this.shadow.setScale(shadowScale, shadowScale);
 
         if (this.scoreContainer) {
+            const targetDepth = (this.doll?.depth ?? 36) + this.scoreOverlayDepthOffset;
+            if (this.scoreContainer.depth !== targetDepth) {
+                this.scoreContainer.setDepth(targetDepth);
+            }
             this.scoreContainer.setPosition(this.position.x, this.position.y - 64);
         }
     }
