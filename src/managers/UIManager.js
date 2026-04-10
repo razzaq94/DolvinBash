@@ -15,6 +15,7 @@ export default class UIManager {
         this.onBetChange = null;
         this.onStart = null;
         this.onReplay = null;
+        this.onStopAutoPlay = null;
 
         this.quickBetOverlay = null;
         this.quickBetPanel = null;
@@ -49,6 +50,7 @@ export default class UIManager {
         this.createHeader();
         this.createBetPanel();
         this.createResultOverlay();
+        this.createInsufficientOverlay();
         this.updateBet(this.bet);
         this.updateBalance(this.balance);
     }
@@ -161,6 +163,11 @@ export default class UIManager {
             this.changeBet(10);
         });
         document.getElementById("ui-btn-play")?.addEventListener("click", () => {
+            if (this.autoPlayRemaining > 0) {
+                this.playUiClick();
+                this.onStopAutoPlay?.();
+                return;
+            }
             this.playUiStart();
             this.onStart?.();
         });
@@ -187,6 +194,7 @@ export default class UIManager {
         // Initial label state
         this.setAutoPlayRemaining(0);
         this.updateSpeedButton();
+        this.updatePlayButtonMode();
     }
 
     createResultOverlay() {
@@ -207,14 +215,72 @@ export default class UIManager {
         `;
         this.root.appendChild(overlay);
         document.getElementById("ui-btn-replay")?.addEventListener("click", () => {
+            if (this.autoPlayRemaining > 0) {
+                return;
+            }
             this.playUiClick();
             this.onReplay?.();
         });
     }
 
+    createInsufficientOverlay() {
+        const overlay = document.createElement("div");
+        overlay.className = "result-overlay";
+        overlay.id = "ui-insufficient-overlay";
+        overlay.innerHTML = `
+            <div class="result-panel glass-panel" style="max-width: 380px;">
+                <h2 id="ui-insufficient-title" class="result-title" style="font-size: 34px; color: var(--accent-danger);">INSUFFICIENT BALANCE</h2>
+                <div id="ui-insufficient-msg" class="stat-value" style="margin-bottom: 18px; text-align: center;">
+                    Please reduce bet amount.
+                </div>
+                <button id="ui-btn-insufficient-ok" class="btn-main" style="width: 100%;">OK</button>
+            </div>
+        `;
+        this.root.appendChild(overlay);
+        document.getElementById("ui-btn-insufficient-ok")?.addEventListener("click", () => {
+            this.playUiClick();
+            this.hideInsufficientBalance();
+        });
+    }
+
+    showInsufficientBalance(betAmount, balanceAmount) {
+        const overlay = document.getElementById("ui-insufficient-overlay");
+        const msg = document.getElementById("ui-insufficient-msg");
+        if (msg) {
+            msg.textContent = `Bet ${Number(betAmount).toFixed(2)} is greater than balance ${Number(balanceAmount).toFixed(2)}.`;
+        }
+        if (overlay) overlay.classList.add("visible");
+    }
+
+    hideInsufficientBalance() {
+        const overlay = document.getElementById("ui-insufficient-overlay");
+        if (overlay) overlay.classList.remove("visible");
+    }
+
     bindEvents(roundManager) {
         this.onStart = () => roundManager.startPrototypeRound();
         this.onReplay = () => roundManager.replay();
+        this.onStopAutoPlay = () => roundManager.stopAutoPlay?.();
+    }
+
+    updatePlayButtonMode() {
+        const playBtn = document.getElementById("ui-btn-play");
+        if (!playBtn) return;
+        const isAutoRunning = this.autoPlayRemaining > 0;
+        const canStartNow = !!this.scene.gameStateManager?.isState?.(GAME_STATES.BETTING);
+        playBtn.textContent = isAutoRunning ? "✕" : "PLAY";
+        playBtn.title = isAutoRunning ? "Stop autoplay" : "Play";
+        playBtn.setAttribute("aria-label", isAutoRunning ? "Stop autoplay" : "Play");
+        if (isAutoRunning) {
+            playBtn.style.pointerEvents = "auto";
+            playBtn.style.opacity = "";
+            playBtn.disabled = false;
+        } else {
+            // After stopping autoplay mid-round, PLAY should stay non-interactable until BETTING.
+            playBtn.style.pointerEvents = canStartNow ? "auto" : "none";
+            playBtn.style.opacity = canStartNow ? "" : "0.6";
+            playBtn.disabled = !canStartNow;
+        }
     }
 
     setPrePlayControlsEnabled(enabled) {
@@ -235,6 +301,15 @@ export default class UIManager {
             el.style.pointerEvents = enabled ? "auto" : "none";
             el.style.opacity = enabled ? "" : "0.6";
         });
+        // If autoplay is running, play button acts as an always-clickable stop (✕).
+        if (this.autoPlayRemaining > 0) {
+            const playBtn = document.getElementById("ui-btn-play");
+            if (playBtn) {
+                playBtn.style.pointerEvents = "auto";
+                playBtn.style.opacity = "";
+                playBtn.disabled = false;
+            }
+        }
         // Volume button should always stay interactable.
         const muteBtn = document.getElementById("ui-btn-mute");
         if (muteBtn) {
@@ -247,6 +322,7 @@ export default class UIManager {
     updateByState(state) {
         const betPanel = document.getElementById("ui-bet-panel");
         const overlay = document.getElementById("ui-result-overlay");
+        const autoRunning = this.autoPlayRemaining > 0;
 
         switch (state) {
             case GAME_STATES.BETTING:
@@ -254,17 +330,18 @@ export default class UIManager {
                 if (betPanel) betPanel.style.opacity = "1";
                 if (betPanel) betPanel.style.pointerEvents = "auto";
                 if (overlay) overlay.classList.remove("visible");
+                this.hideInsufficientBalance();
                 this.hudPanel.setVisible(false);
                 break;
             case GAME_STATES.FLYING:
                 this.setPrePlayControlsEnabled(false);
                 this.hudPanel.setVisible(true);
-                if (betPanel) betPanel.style.pointerEvents = "none";
+                if (betPanel) betPanel.style.pointerEvents = autoRunning ? "auto" : "none";
                 break;
             case GAME_STATES.KICKING:
             case GAME_STATES.ROUND_END:
                 this.setPrePlayControlsEnabled(false);
-                if (betPanel) betPanel.style.pointerEvents = "none";
+                if (betPanel) betPanel.style.pointerEvents = autoRunning ? "auto" : "none";
                 this.hudPanel.setVisible(true);
                 break;
             case GAME_STATES.RESULT:
@@ -276,6 +353,7 @@ export default class UIManager {
                 this.hudPanel.setVisible(false);
                 break;
         }
+        this.updatePlayButtonMode();
     }
 
     changeBet(delta) {
@@ -447,6 +525,7 @@ export default class UIManager {
 
         const grid = document.createElement("div");
         grid.className = "autoplay-grid";
+        let draftAutoPlayCount = Math.max(1, Math.min(1000, Number(this.autoPlayCount) || 1));
 
         const values = [1, 10, 20, 50, 100, 250, 500, 750, 1000];
         values.forEach((val) => {
@@ -454,12 +533,6 @@ export default class UIManager {
             btn.className = "autoplay-chip";
             btn.type = "button";
             btn.textContent = String(val);
-            btn.addEventListener("click", () => {
-                this.playUiClick();
-                this.autoPlayCount = val;
-                this.autoPlaySelected = true;
-                this.setAutoPlayRemaining(0);
-            });
             grid.appendChild(btn);
         });
 
@@ -476,19 +549,18 @@ export default class UIManager {
         slider.min = "1";
         slider.max = "1000";
         slider.step = "1";
-        slider.value = String(this.autoPlayCount || 1);
+        slider.value = String(draftAutoPlayCount);
 
         const sliderValue = document.createElement("div");
         sliderValue.className = "autoplay-value";
-        sliderValue.textContent = String(this.autoPlayCount || 1);
+        sliderValue.textContent = String(draftAutoPlayCount);
 
         const syncValue = (next) => {
             const v = Math.max(1, Math.min(1000, Number(next) || 1));
-            this.autoPlayCount = v;
-            this.autoPlaySelected = true;
+            draftAutoPlayCount = v;
             slider.value = String(v);
             sliderValue.textContent = String(v);
-            this.setAutoPlayRemaining(0);
+            updateStartLabel();
         };
 
         slider.addEventListener("input", () => {
@@ -498,7 +570,10 @@ export default class UIManager {
 
         // Ensure chips update slider/value too
         grid.querySelectorAll("button.autoplay-chip").forEach((btn) => {
-            btn.addEventListener("click", () => syncValue(btn.textContent));
+            btn.addEventListener("click", () => {
+                this.playUiClick();
+                syncValue(btn.textContent);
+            });
         });
 
         const actions = document.createElement("div");
@@ -507,15 +582,18 @@ export default class UIManager {
         const startBtn = document.createElement("button");
         startBtn.className = "btn-main autoplay-start";
         startBtn.type = "button";
-        startBtn.textContent = `Start autoplay (${this.autoPlayCount || 1})`;
+        startBtn.textContent = `Start autoplay (${draftAutoPlayCount})`;
         const updateStartLabel = () => {
-            startBtn.textContent = `Start autoplay (${this.autoPlayCount || 1})`;
+            startBtn.textContent = `Start autoplay (${draftAutoPlayCount})`;
         };
         slider.addEventListener("input", updateStartLabel);
         grid.querySelectorAll("button.autoplay-chip").forEach((btn) => btn.addEventListener("click", updateStartLabel));
 
         startBtn.addEventListener("click", () => {
             this.playUiStart();
+            this.autoPlayCount = draftAutoPlayCount;
+            this.autoPlaySelected = true;
+            this.setAutoPlayRemaining(0);
             this.closeAutoPlay();
             this.onStart?.();
         });
@@ -621,6 +699,13 @@ export default class UIManager {
         this.autoPlayRemaining = r;
         const el = document.getElementById("ui-btn-autoplay");
         if (!el) return;
+        const replayBtn = document.getElementById("ui-btn-replay");
+        if (replayBtn) {
+            const lockReplay = r > 0;
+            replayBtn.disabled = lockReplay;
+            replayBtn.style.pointerEvents = lockReplay ? "none" : "auto";
+            replayBtn.style.opacity = lockReplay ? "0.6" : "";
+        }
 
         // Reference style: show ONLY number when active/selected; icon is always present.
         if (r > 0) {
@@ -630,6 +715,7 @@ export default class UIManager {
 
         // When not running: show selected count ONLY if user selected something.
         el.textContent = this.autoPlaySelected ? String(this.autoPlayCount) : "";
+        this.updatePlayButtonMode();
     }
 
     clearAutoPlaySelection() {
@@ -637,9 +723,11 @@ export default class UIManager {
         this.autoPlayRemaining = 0;
         const el = document.getElementById("ui-btn-autoplay");
         if (el) el.textContent = "";
+        this.updatePlayButtonMode();
     }
 
     getCurrentBet() { return this.bet; }
+    getCurrentBalance() { return this.balance; }
     getAutoPlayCount() { return this.autoPlayCount; }
     getAutoPlaySelected() { return !!this.autoPlaySelected; }
     getSpeedMode() { return this.speedMode || "NORMAL"; }

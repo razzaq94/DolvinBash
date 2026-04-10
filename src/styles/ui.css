@@ -90,6 +90,7 @@
     display: flex;
     justify-content: flex-start;
     align-items: center;
+    gap: 8px;
     flex-shrink: 0;
     pointer-events: none;
     min-height: 0;
@@ -161,6 +162,21 @@
         height: 36px;
         border-radius: 11px;
         font-size: 16px;
+    }
+}
+
+@media (max-width: 768px) {
+    .game-header {
+        justify-content: flex-end;
+    }
+
+    /* Avoid top-right overlap on mobile: keep only mute control visible */
+    .logo-text {
+        display: none;
+    }
+
+    .mute-btn {
+        margin-left: auto !important;
     }
 }
 
@@ -760,9 +776,10 @@
 }
 
 #ui-btn-autoplay.autoplay-btn:not(:empty) {
-    background-position: center 10px;
+    background-position: center 6px;
     background-size: 16px 16px;
-    padding-top: 14px;
+    padding-top: 18px;
+    padding-bottom: 3px;
     line-height: 1;
     font-size: 13px;
 }

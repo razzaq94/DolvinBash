@@ -29,6 +29,20 @@ export default class RoundManager {
             return;
         }
 
+        const requestedBet = Number(this.uiManager.getCurrentBet?.() ?? 0) || 0;
+        const currentBalance = Number(this.uiManager.getCurrentBalance?.() ?? 0) || 0;
+        if (requestedBet > currentBalance) {
+            console.warn(`[RoundManager] Cannot start round. Bet (${requestedBet}) exceeds balance (${currentBalance}).`);
+            this.uiManager.showInsufficientBalance?.(requestedBet, currentBalance);
+            // If this was an autoplay attempt, stop chain immediately.
+            if (fromAutoplay) {
+                this.autoPlayRemaining = 0;
+                this.uiManager.setAutoPlayRemaining?.(0);
+                this.uiManager.clearAutoPlaySelection?.();
+            }
+            return;
+        }
+
         // If a previous round win stinger is still playing, stop it before kickoff.
         this.scene.audioManager?.stop?.("sfx_win");
 
@@ -36,7 +50,7 @@ export default class RoundManager {
         this.isRoundActive = true;
         this.hitHazard = false;
 
-        this.currentBet = this.uiManager.getCurrentBet();
+        this.currentBet = requestedBet;
         this.currentSpeedMode = this.uiManager.getSpeedMode();
         this.currentVolatility = this.uiManager.getVolatility();
         if (!fromAutoplay) {
@@ -264,6 +278,12 @@ export default class RoundManager {
         this.interactionSystem.clearAll();
 
         this.gameStateManager.setState(GAME_STATES.BETTING, "replay_pressed");
+    }
+
+    stopAutoPlay() {
+        this.autoPlayRemaining = 0;
+        this.uiManager.setAutoPlayRemaining?.(0);
+        this.uiManager.clearAutoPlaySelection?.();
     }
 
     emitHostEvent(callbackName, payload) {
