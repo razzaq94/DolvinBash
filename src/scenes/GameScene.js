@@ -47,9 +47,6 @@ export default class GameScene extends Phaser.Scene {
         this.registerResize();
 
         this.gameStateManager.init(GAME_STATES.BETTING);
-
-        // Background music
-        this.bgm = this.audioManager?.play("bgm_loop", { volume: 0.08, loop: true, rate: 0.95 });
     }
 
     createWorld() {

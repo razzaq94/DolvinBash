@@ -84,7 +84,6 @@ export default class PreloadScene extends Phaser.Scene {
         // Win/Loss + Background music
         this.load.audio("sfx_win", "src/sounds/gamewin.mp3");
         this.load.audio("sfx_loss", "src/sounds/gameover.mp3");
-        this.load.audio("bgm_loop", "https://labs.phaser.io/assets/audio/tech.mp3");
     }
 
     /**
