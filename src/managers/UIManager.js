@@ -47,6 +47,7 @@ export default class UIManager {
         if (!this.root) return;
         this.root.innerHTML = "";
         this.loadUiPrefs();
+        this.createPrePlayLogos();
         this.createHeader();
         this.createBetPanel();
         this.createResultOverlay();
@@ -82,7 +83,12 @@ export default class UIManager {
         const header = document.createElement("div");
         header.className = "game-header";
         header.innerHTML = `
-            <div class="logo-text">DOLWIN &amp; BASH</div>
+            <img
+                id="ui-logo-top-right"
+                class="logo-top-right-image"
+                src="assets/logo1.png"
+                alt="Dolwin Bash Logo Top Right"
+            />
             <button id="ui-btn-mute" class="mute-btn" title="Mute / Unmute" aria-label="Mute / Unmute" style="margin-left:10px;">🔊</button>
         `;
         this.root.prepend(header);
@@ -100,6 +106,22 @@ export default class UIManager {
             this.saveUiPrefs();
             sync();
         });
+    }
+
+    createPrePlayLogos() {
+        if (!this.root) return;
+        const wrap = document.createElement("div");
+        wrap.className = "preplay-logos";
+        wrap.id = "ui-preplay-logos";
+        wrap.innerHTML = `
+            <img
+                id="ui-logo-middle"
+                class="logo-middle-image"
+                src="assets/logo2.png"
+                alt="Dolwin Bash Logo Center"
+            />
+        `;
+        this.root.appendChild(wrap);
     }
 
     createBetPanel() {
@@ -156,11 +178,11 @@ export default class UIManager {
 
         document.getElementById("ui-btn-minus")?.addEventListener("click", () => {
             this.playUiClick();
-            this.changeBet(-10);
+            this.changeBet(-1);
         });
         document.getElementById("ui-btn-plus")?.addEventListener("click", () => {
             this.playUiClick();
-            this.changeBet(10);
+            this.changeBet(1);
         });
         document.getElementById("ui-btn-play")?.addEventListener("click", () => {
             if (this.autoPlayRemaining > 0) {
@@ -323,6 +345,11 @@ export default class UIManager {
         const betPanel = document.getElementById("ui-bet-panel");
         const overlay = document.getElementById("ui-result-overlay");
         const autoRunning = this.autoPlayRemaining > 0;
+        const isPrePlay = state === GAME_STATES.BETTING;
+        const middleLogo = document.getElementById("ui-logo-middle");
+        const topRightLogo = document.getElementById("ui-logo-top-right");
+        if (middleLogo) middleLogo.style.display = isPrePlay ? "block" : "none";
+        if (topRightLogo) topRightLogo.style.display = isPrePlay ? "block" : "none";
 
         switch (state) {
             case GAME_STATES.BETTING:

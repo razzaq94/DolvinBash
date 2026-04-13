@@ -21,9 +21,11 @@ export default class RoundManager {
         this.currentVolatility = GAME_CONFIG.round.defaultVolatility || "NORMAL";
 
         this.autoPlayRemaining = 0;
+        this.currentRoundId = null;
+        this.externalRoundData = null;
     }
 
-    startPrototypeRound({ fromAutoplay = false } = {}) {
+    startPrototypeRound({ fromAutoplay = false, externalRoundData = null } = {}) {
         if (!this.gameStateManager.isState(GAME_STATES.BETTING)) {
             console.warn("[RoundManager] Cannot start round. Current state is not BETTING.");
             return;
@@ -53,6 +55,26 @@ export default class RoundManager {
         this.currentBet = requestedBet;
         this.currentSpeedMode = this.uiManager.getSpeedMode();
         this.currentVolatility = this.uiManager.getVolatility();
+        this.currentRoundId =
+            String(externalRoundData?.roundId || "")
+            || `rnd_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+        this.externalRoundData = externalRoundData || null;
+
+        // Client PDF callback name: autoplay started
+        if (!fromAutoplay) {
+            const selected = !!this.uiManager.getAutoPlaySelected?.();
+            const spins = Math.max(1, Number(this.uiManager.getAutoPlayCount?.() ?? 1) || 1);
+            if (selected && spins > 0) {
+                const fn = window?.onAutoplayStart;
+                if (typeof fn === "function") {
+                    try {
+                        fn(this.currentBet, spins);
+                    } catch (error) {
+                        console.error("[RoundManager] host callback failed: onAutoplayStart", error);
+                    }
+                }
+            }
+        }
         if (!fromAutoplay) {
             const desired = Math.max(1, Number(this.uiManager.getAutoPlayCount?.() ?? 1) || 1);
             // Show/run autoplay ONLY when user explicitly selected it (even if it's x1).
@@ -75,6 +97,7 @@ export default class RoundManager {
         this.interactionSystem.loadPattern(this.currentPattern);
 
         this.emitHostEvent("onDolvinRoundStart", {
+            roundId: this.currentRoundId,
             betAmount: this.currentBet,
             patternId: this.currentPattern?.id || "",
             speedMode: this.currentSpeedMode,
@@ -201,6 +224,7 @@ export default class RoundManager {
             this.interactionSystem.getMaxCombo(),
             travelStats
         );
+        this.lastResult = this.applyExternalRoundResult(this.lastResult);
 
         this.lastResult.patternId = this.interactionSystem.getPatternId();
 
@@ -216,6 +240,7 @@ export default class RoundManager {
             // Result stingers are handled below (after autoplay decrement).
 
             this.emitHostEvent("onDolvinRoundEnd", {
+                roundId: this.currentRoundId,
                 betAmount: this.lastResult.betAmount,
                 multiplier: this.lastResult.multiplier,
                 finalMultiplier: this.lastResult.finalMultiplier,
@@ -271,6 +296,7 @@ export default class RoundManager {
         this.isRoundActive = false;
         this.hitHazard = false;
         this.currentPattern = null;
+        this.externalRoundData = null;
 
         this.scene.resetCamera();
         this.dollController.reset();
@@ -286,13 +312,66 @@ export default class RoundManager {
         this.uiManager.clearAutoPlaySelection?.();
     }
 
+    applyExternalRoundResult(baseResult) {
+        const ext = this.externalRoundData;
+        if (!ext) {
+            return baseResult;
+        }
+
+        const bet = Math.max(0, Number(ext.betAmount) || Number(baseResult?.betAmount) || this.currentBet || 0);
+        let win = Number(ext.winAmount);
+        const crashPoint = Number(ext.crashPoint);
+
+        if (!Number.isFinite(win)) {
+            if (Number.isFinite(crashPoint) && crashPoint > 0) {
+                win = Number((bet * crashPoint).toFixed(2));
+            } else {
+                win = Number(baseResult?.payout) || 0;
+            }
+        }
+        win = Math.max(0, Number(win.toFixed(2)));
+
+        let finalMultiplier = Number(baseResult?.finalMultiplier) || 1;
+        if (Number.isFinite(crashPoint) && crashPoint > 0) {
+            finalMultiplier = Number(crashPoint.toFixed(2));
+        } else if (bet > 0) {
+            finalMultiplier = Number((win / bet).toFixed(2));
+        }
+        finalMultiplier = Math.max(1, finalMultiplier);
+
+        const hitHazard = win <= 0;
+        const merged = {
+            ...baseResult,
+            betAmount: bet,
+            multiplier: finalMultiplier,
+            finalMultiplier,
+            payout: win,
+            netChange: Number((win - bet).toFixed(2)),
+            outcome: hitHazard ? "LOSE" : "WIN",
+            hitHazard
+        };
+
+        return merged;
+    }
+
     emitHostEvent(callbackName, payload) {
-        const fn = window?.[callbackName];
-        if (typeof fn === "function") {
-            try {
-                fn(payload);
-            } catch (error) {
-                console.error(`[RoundManager] host callback failed: ${callbackName}`, error);
+        if (callbackName === "onDolvinRoundStart") {
+            const onRoundStart = window?.onRoundStart;
+            if (typeof onRoundStart === "function") {
+                try {
+                    onRoundStart(Number(payload?.betAmount) || 0);
+                } catch (error) {
+                    console.error("[RoundManager] host callback failed: onRoundStart", error);
+                }
+            }
+        } else if (callbackName === "onDolvinRoundEnd") {
+            const onRoundEnd = window?.onRoundEnd;
+            if (typeof onRoundEnd === "function") {
+                try {
+                    onRoundEnd(String(payload?.roundId || ""), Number(payload?.payout) || 0);
+                } catch (error) {
+                    console.error("[RoundManager] host callback failed: onRoundEnd", error);
+                }
             }
         }
     }

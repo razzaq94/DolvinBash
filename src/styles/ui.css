@@ -96,6 +96,32 @@
     min-height: 0;
 }
 
+.preplay-logos {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 15;
+}
+
+.logo-middle-image {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: clamp(200px, 30vw, 460px);
+    max-width: 80vw;
+    height: auto;
+    filter: drop-shadow(0 12px 26px rgba(2, 6, 23, 0.45));
+}
+
+.logo-top-right-image {
+    width: clamp(96px, 11vw, 180px);
+    max-width: 26vw;
+    height: auto;
+    filter: drop-shadow(0 6px 18px rgba(2, 6, 23, 0.4));
+    pointer-events: none;
+}
+
 @media (min-width: 901px) {
     .game-header {
         justify-content: flex-end;
@@ -170,13 +196,13 @@
         justify-content: flex-end;
     }
 
-    /* Avoid top-right overlap on mobile: keep only mute control visible */
-    .logo-text {
-        display: none;
+    .logo-middle-image {
+        width: clamp(170px, 56vw, 320px);
     }
 
-    .mute-btn {
-        margin-left: auto !important;
+    .logo-top-right-image {
+        width: clamp(84px, 24vw, 130px);
+        max-width: 32vw;
     }
 }
 
