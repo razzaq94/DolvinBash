@@ -79,14 +79,20 @@ export default class UIManager {
         }
     }
 
+    getUiLogoSrc(textureKey, fallbackPath) {
+        const src = this.scene?.textures?.get?.(textureKey)?.getSourceImage?.()?.src;
+        return src || fallbackPath;
+    }
+
     createHeader() {
+        const topLogoSrc = this.getUiLogoSrc("ui_logo_top", "assets/logo1.png");
         const header = document.createElement("div");
         header.className = "game-header";
         header.innerHTML = `
             <img
                 id="ui-logo-top-right"
                 class="logo-top-right-image"
-                src="assets/logo1.png"
+                src="${topLogoSrc}"
                 alt="Dolwin Bash Logo Top Right"
             />
             <button id="ui-btn-mute" class="mute-btn" title="Mute / Unmute" aria-label="Mute / Unmute" style="margin-left:10px;">🔊</button>
@@ -110,6 +116,7 @@ export default class UIManager {
 
     createPrePlayLogos() {
         if (!this.root) return;
+        const midLogoSrc = this.getUiLogoSrc("ui_logo_mid", "assets/logo2.png");
         const wrap = document.createElement("div");
         wrap.className = "preplay-logos";
         wrap.id = "ui-preplay-logos";
@@ -117,7 +124,7 @@ export default class UIManager {
             <img
                 id="ui-logo-middle"
                 class="logo-middle-image"
-                src="assets/logo2.png"
+                src="${midLogoSrc}"
                 alt="Dolwin Bash Logo Center"
             />
         `;

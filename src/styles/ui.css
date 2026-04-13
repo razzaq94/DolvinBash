@@ -198,6 +198,7 @@
 
     .logo-middle-image {
         width: clamp(170px, 56vw, 320px);
+        top: 47%;
     }
 
     .logo-top-right-image {
