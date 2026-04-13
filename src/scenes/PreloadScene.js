@@ -26,9 +26,6 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.image("bg_skyline", "assets/obstacles/sky.png");
         this.load.image("bg_buildings", "assets/obstacles/far buildings.png");
         this.load.image("bg_road_bushes", "assets/obstacles/road and bushes.png");
-        // UI logos should be part of preload pipeline so they are ready before gameplay UI appears.
-        this.load.image("ui_logo_top", "assets/logo1.png");
-        this.load.image("ui_logo_mid", "assets/logo2.png");
 
         this.load.image("kicker_idle", "assets/kicker_idle.png");
         this.load.image("kicker_ready", "assets/kicker_ready.png");
