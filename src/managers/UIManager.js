@@ -79,14 +79,24 @@ export default class UIManager {
         }
     }
 
+    getAssetUrl(relativePath) {
+        const path = String(window.location.pathname || "/");
+        const basePath = path.endsWith("/")
+            ? path
+            : `${path.slice(0, Math.max(0, path.lastIndexOf("/") + 1))}`;
+        const base = `${window.location.origin}${basePath}`;
+        return new URL(relativePath, base).toString();
+    }
+
     createHeader() {
+        const logoTopSrc = this.getAssetUrl("assets/logo1.png");
         const header = document.createElement("div");
         header.className = "game-header";
         header.innerHTML = `
             <img
                 id="ui-logo-top-right"
                 class="logo-top-right-image"
-                src="assets/logo1.png"
+                src="${logoTopSrc}"
                 alt="Dolwin Bash Logo Top Right"
             />
             <button id="ui-btn-mute" class="mute-btn" title="Mute / Unmute" aria-label="Mute / Unmute" style="margin-left:10px;">🔊</button>
@@ -110,6 +120,7 @@ export default class UIManager {
 
     createPrePlayLogos() {
         if (!this.root) return;
+        const logoMiddleSrc = this.getAssetUrl("assets/logo2.png");
         const wrap = document.createElement("div");
         wrap.className = "preplay-logos";
         wrap.id = "ui-preplay-logos";
@@ -117,7 +128,7 @@ export default class UIManager {
             <img
                 id="ui-logo-middle"
                 class="logo-middle-image"
-                src="assets/logo2.png"
+                src="${logoMiddleSrc}"
                 alt="Dolwin Bash Logo Center"
             />
         `;
