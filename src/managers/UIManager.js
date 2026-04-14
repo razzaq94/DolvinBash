@@ -235,7 +235,7 @@ export default class UIManager {
         overlay.className = "result-overlay";
         overlay.id = "ui-result-overlay";
         overlay.innerHTML = `
-            <div class="result-panel glass-panel">
+            <div class="result-panel glass-panel" style="pointer-events: none;">
                 <h2 id="ui-result-title" class="result-title">ROUND ENDED</h2>
                 <div class="result-stats">
                     <div class="stat-item"><span class="stat-label">Bet</span><span id="res-bet" class="stat-value">0</span></div>
@@ -243,17 +243,60 @@ export default class UIManager {
                     <div class="stat-item"><span class="stat-label">Distance</span><span id="res-dist" class="stat-value">0</span></div>
                     <div class="stat-item"><span class="stat-label">Payout</span><span id="res-payout" class="stat-value success">0</span></div>
                 </div>
-                <button id="ui-btn-replay" class="btn-main" style="width: 100%;">REPLAY</button>
+                <button id="ui-btn-replay" class="btn-main" style="width: 100%; pointer-events: auto;">REPLAY</button>
             </div>
         `;
         this.root.appendChild(overlay);
-        document.getElementById("ui-btn-replay")?.addEventListener("click", () => {
+        const replayBtn = document.getElementById("ui-btn-replay");
+        let lastReplayTriggerAt = 0;
+        const safeTriggerReplay = () => {
+            const now = Date.now();
+            if (now - lastReplayTriggerAt < 220) return;
+            lastReplayTriggerAt = now;
+            triggerReplay();
+        };
+        const triggerReplay = () => {
             if (this.autoPlayRemaining > 0) {
                 return;
             }
             this.playUiClick();
             this.onReplay?.();
-        });
+        };
+        replayBtn?.addEventListener("click", safeTriggerReplay);
+
+        // Strong fallback: capture click/pointer/touch at overlay level and fire replay whenever
+        // pointer coordinates are inside an expanded replay-button hitbox.
+        const getXY = (evt) => {
+            if (Number.isFinite(evt?.clientX) && Number.isFinite(evt?.clientY)) {
+                return { x: Number(evt.clientX), y: Number(evt.clientY) };
+            }
+            const t = evt?.changedTouches?.[0] || evt?.touches?.[0];
+            if (t && Number.isFinite(t.clientX) && Number.isFinite(t.clientY)) {
+                return { x: Number(t.clientX), y: Number(t.clientY) };
+            }
+            return null;
+        };
+        const tryTriggerFromPoint = (e) => {
+            if (!replayBtn || this.autoPlayRemaining > 0) return;
+            const pt = getXY(e);
+            if (!pt) return;
+
+            const r = replayBtn.getBoundingClientRect();
+            // Moderate expansion: 20px top/bottom, 10px sides.
+            const hit = {
+                left: r.left - 10,
+                right: r.right + 10,
+                top: r.top - 20,
+                bottom: r.bottom + 20
+            };
+            if (pt.x >= hit.left && pt.x <= hit.right && pt.y >= hit.top && pt.y <= hit.bottom) {
+                e.preventDefault();
+                safeTriggerReplay();
+            }
+        };
+        overlay.addEventListener("pointerup", tryTriggerFromPoint, true);
+        overlay.addEventListener("click", tryTriggerFromPoint, true);
+        overlay.addEventListener("touchend", tryTriggerFromPoint, true);
     }
 
     createInsufficientOverlay() {

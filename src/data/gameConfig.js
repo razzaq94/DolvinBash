@@ -6,7 +6,7 @@ export const GAME_CONFIG = {
 
     round: {
         startingBalance: 1000,
-        defaultBet: 50,
+        defaultBet: 1,
         minBet: 1,
         maxBet: 500,
         baseMultiplier: 1,
