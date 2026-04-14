@@ -207,7 +207,7 @@
 
     .logo-middle-image {
         width: clamp(170px, 56vw, 320px);
-        transform: translate(-50%, -120%);
+        transform: translate(-50%, -110%);
     }
 
     .logo-top-right-image {
