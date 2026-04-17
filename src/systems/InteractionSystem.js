@@ -38,6 +38,10 @@ export default class InteractionSystem {
         this.nextBatSpawnX = 900;
         this.prevDollX = null;
         this.prevDollY = null;
+        this.authoritativeRound = {
+            enabled: false,
+            targetMultiplier: 1
+        };
 
         // Debug overlay/logging for air-lane (+1/x/-1) hits.
         this.airHitDebugGfx = null;
@@ -1158,6 +1162,21 @@ export default class InteractionSystem {
         this.volatilityTuning = GAME_CONFIG.volatilityModes?.[volatility] || GAME_CONFIG.volatilityModes?.NORMAL || {};
     }
 
+    setAuthoritativeRoundControl({ enabled = false, targetMultiplier = 1 } = {}) {
+        this.authoritativeRound.enabled = !!enabled;
+        this.authoritativeRound.targetMultiplier = this.clampMultiplier(Math.max(1, Number(targetMultiplier) || 1));
+    }
+
+    setAuthoritativeLiveMultiplier(value) {
+        if (!this.authoritativeRound.enabled) return;
+        const prev = this.multiplier;
+        this.multiplier = this.clampMultiplier(Math.max(1, Number(value) || 1));
+        if (this.multiplier !== prev) {
+            this.emitMultiplierChanged();
+            this.dollController.updateScoreValue?.(this.multiplier);
+        }
+    }
+
     update(deltaSeconds) {
         if (!this.interactionsEnabled || !this.dollController?.doll) {
             return;
@@ -1181,6 +1200,16 @@ export default class InteractionSystem {
         this.maintainBombStream(dollX);
         this.maintainBatStream(dollX);
         this.updateComboTimer(deltaSeconds);
+
+        // Strict server-authoritative mode:
+        // Do NOT let local obstacle collisions alter physics/flight path.
+        // Flight timeline/landing are controlled by RoundManager crashPoint controller.
+        if (this.authoritativeRound.enabled) {
+            this.prevDollX = dollX;
+            this.prevDollY = dollY;
+            this.maintainSkyMultiplierStream(dollX);
+            return;
+        }
 
         const dollCircleRadius = this.getDollCircleRadius();
 
@@ -1230,10 +1259,12 @@ export default class InteractionSystem {
 
             const prevMultiplier = this.multiplier;
 
-            if (effect.type === "multiply") {
-                this.multiplier = this.clampMultiplier(this.multiplier * effect.value);
-            } else if (effect.type === "add") {
-                this.multiplier = this.clampMultiplier(this.multiplier + effect.value + comboBonus);
+            if (!this.authoritativeRound.enabled) {
+                if (effect.type === "multiply") {
+                    this.multiplier = this.clampMultiplier(this.multiplier * effect.value);
+                } else if (effect.type === "add") {
+                    this.multiplier = this.clampMultiplier(this.multiplier + effect.value + comboBonus);
+                }
             }
 
             this.consumeObject(item);
@@ -1243,15 +1274,16 @@ export default class InteractionSystem {
             this.spawnImpactParticles("pickup", item.x, item.y);
             this.applyRandomCollisionImpulse("pickup");
 
-            const labelVal = effect.type === "multiply" ? `x${effect.value}` : `+${effect.value}`;
-            const floatingValue = comboBonus > 0 ? `${labelVal} (+${comboBonus})` : labelVal;
-
-            // Use Bubblegum colors: Blue for x multipliers, Green for + additions
-            const floatColor = effect.type === "multiply" ? "#60a5fa" : "#4ade80";
-            this.showFloatingText(item.x, item.y - 26, floatingValue, floatColor);
+            if (!this.authoritativeRound.enabled) {
+                const labelVal = effect.type === "multiply" ? `x${effect.value}` : `+${effect.value}`;
+                const floatingValue = comboBonus > 0 ? `${labelVal} (+${comboBonus})` : labelVal;
+                // Use Bubblegum colors: Blue for x multipliers, Green for + additions
+                const floatColor = effect.type === "multiply" ? "#60a5fa" : "#4ade80";
+                this.showFloatingText(item.x, item.y - 26, floatingValue, floatColor);
+            }
             this.dollController.onGameplayInteraction?.("pickup");
 
-            if (comboBonus > 0) {
+            if (comboBonus > 0 && !this.authoritativeRound.enabled) {
                 this.showFloatingText(item.x, item.y - 58, `COMBO +${comboBonus}`, "#a855f7"); // Purple
             }
 
@@ -1278,15 +1310,17 @@ export default class InteractionSystem {
             const prevMultiplier = this.multiplier;
 
             // Bombs: always ÷2 on hit
-            if (effect.type === "divide" || effect.type === "subtract" || effect.type === "multiply") {
-                const divisor = 2;
-                this.multiplier = this.clampMultiplier(this.multiplier / divisor);
-                this.showFloatingText(item.x, item.y - 26, `÷${Number(divisor.toFixed(2))}`, "#f87171");
-            } else {
-                // Default: small penalty
-                const divisor = 2;
-                this.multiplier = this.clampMultiplier(this.multiplier / divisor);
-                this.showFloatingText(item.x, item.y - 26, `÷${Number(divisor.toFixed(2))}`, "#f87171");
+            if (!this.authoritativeRound.enabled) {
+                if (effect.type === "divide" || effect.type === "subtract" || effect.type === "multiply") {
+                    const divisor = 2;
+                    this.multiplier = this.clampMultiplier(this.multiplier / divisor);
+                    this.showFloatingText(item.x, item.y - 26, `÷${Number(divisor.toFixed(2))}`, "#f87171");
+                } else {
+                    // Default: small penalty
+                    const divisor = 2;
+                    this.multiplier = this.clampMultiplier(this.multiplier / divisor);
+                    this.showFloatingText(item.x, item.y - 26, `÷${Number(divisor.toFixed(2))}`, "#f87171");
+                }
             }
 
             this.consumeObject(item);
@@ -1369,7 +1403,7 @@ export default class InteractionSystem {
                     (it) => (it.variant === "hole" || it.variant === "trafficcone" || it.variant === "roadblocker")
                 );
 
-        if (roadHit && !roadHit.hasCollided) {
+        if (!this.authoritativeRound.enabled && roadHit && !roadHit.hasCollided) {
             const item = roadHit;
             const groundY = this.getGroundY();
             const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
@@ -1462,26 +1496,30 @@ export default class InteractionSystem {
 
             let logLabel = impulse.label;
 
-            if (skyEffect.type === "multiply") {
-                this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
-                const multiplyFactor = Math.max(1, Number(skyEffect.value) || 1);
-                this.multiplier = this.clampMultiplier(this.multiplier * multiplyFactor);
-                this.showFloatingText(hitX, hitY - 26, `x${Number(multiplyFactor.toFixed(2))}`, "#60a5fa"); // Blue
-                logLabel = `MULTIPLY x${multiplyFactor}`;
-            } else if (skyEffect.type === "add") {
-                this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
-                const addAmount = Number(skyEffect.value) || 0;
-                this.multiplier = this.clampMultiplier(this.multiplier + addAmount);
-                this.showFloatingText(hitX, hitY - 26, `+${Number(addAmount.toFixed(2))}`, "#4ade80"); // Green
-                logLabel = `ADD +${addAmount}`;
-            } else if (skyEffect.type === "subtract") {
-                const subtractAmount = Number(skyEffect.value) || 0;
-                this.multiplier = this.clampMultiplier(this.multiplier - subtractAmount);
-                this.showFloatingText(hitX, hitY - 26, `-${Number(subtractAmount.toFixed(2))}`, "#f43f5e"); // Red
-                logLabel = `MINUS -${subtractAmount}`;
+            if (!this.authoritativeRound.enabled) {
+                if (skyEffect.type === "multiply") {
+                    this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
+                    const multiplyFactor = Math.max(1, Number(skyEffect.value) || 1);
+                    this.multiplier = this.clampMultiplier(this.multiplier * multiplyFactor);
+                    this.showFloatingText(hitX, hitY - 26, `x${Number(multiplyFactor.toFixed(2))}`, "#60a5fa"); // Blue
+                    logLabel = `MULTIPLY x${multiplyFactor}`;
+                } else if (skyEffect.type === "add") {
+                    this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
+                    const addAmount = Number(skyEffect.value) || 0;
+                    this.multiplier = this.clampMultiplier(this.multiplier + addAmount);
+                    this.showFloatingText(hitX, hitY - 26, `+${Number(addAmount.toFixed(2))}`, "#4ade80"); // Green
+                    logLabel = `ADD +${addAmount}`;
+                } else if (skyEffect.type === "subtract") {
+                    const subtractAmount = Number(skyEffect.value) || 0;
+                    this.multiplier = this.clampMultiplier(this.multiplier - subtractAmount);
+                    this.showFloatingText(hitX, hitY - 26, `-${Number(subtractAmount.toFixed(2))}`, "#f43f5e"); // Red
+                    logLabel = `MINUS -${subtractAmount}`;
+                }
             }
 
-            this.showFloatingText(hitX, hitY - 56, logLabel, "#fde047"); // Gold
+            if (!this.authoritativeRound.enabled) {
+                this.showFloatingText(hitX, hitY - 56, logLabel, "#fde047"); // Gold
+            }
             if (isMinus) {
                 // Treat -1 like an obstacle hit: hurt sound + impact expression + forced downward impulse.
                 this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });

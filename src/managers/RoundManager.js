@@ -26,6 +26,10 @@ export default class RoundManager {
         this.awaitingExternalStart = false;
         this.externalStartTimeoutEvent = null;
         this.pendingExternalStartFromAutoplay = false;
+        this.authoritativeFlightEvent = null;
+        this.authoritativeFlightPlan = null;
+        this.authoritativeTargetReached = false;
+        this.authoritativeForcedLandingApplied = false;
     }
 
     emitGameError(message) {
@@ -74,6 +78,92 @@ export default class RoundManager {
             this.pendingExternalStartFromAutoplay = false;
             this.uiManager.setAwaitingExternalStart?.(false);
             this.emitGameError("ROUND_START_TIMEOUT");
+        });
+    }
+
+    getAuthoritativeFlightPlan() {
+        const ext = this.externalRoundData;
+        const crashPoint = Number(ext?.crashPoint);
+        if (!Number.isFinite(crashPoint) || crashPoint <= 0) {
+            return null;
+        }
+        const targetMultiplier = Math.max(1, Number(crashPoint.toFixed(2)));
+        const winAmount = Number(ext?.winAmount);
+        const forceLoss = Number.isFinite(winAmount) ? winAmount <= 0 : false;
+        // Keep a deterministic and smooth flight window while ending exactly on crashPoint.
+        const durationMs = Phaser.Math.Clamp(
+            Math.round(650 + ((targetMultiplier - 1) * 260)),
+            650,
+            6500
+        );
+        return {
+            enabled: true,
+            targetMultiplier,
+            durationMs,
+            forceLoss
+        };
+    }
+
+    stopAuthoritativeFlightController() {
+        this.authoritativeFlightEvent?.remove?.(false);
+        this.authoritativeFlightEvent = null;
+        this.authoritativeFlightPlan = null;
+        this.authoritativeTargetReached = false;
+        this.authoritativeForcedLandingApplied = false;
+    }
+
+    stopAuthoritativeFlightTickerOnly() {
+        this.authoritativeFlightEvent?.remove?.(false);
+        this.authoritativeFlightEvent = null;
+    }
+
+    startAuthoritativeFlightController(plan) {
+        this.stopAuthoritativeFlightController();
+        this.authoritativeFlightPlan = plan;
+        this.authoritativeTargetReached = false;
+        this.authoritativeForcedLandingApplied = false;
+        this.interactionSystem.setAuthoritativeRoundControl?.({
+            enabled: true,
+            targetMultiplier: plan.targetMultiplier
+        });
+        this.interactionSystem.setAuthoritativeLiveMultiplier?.(1);
+
+        const startedAt = performance.now();
+        this.authoritativeFlightEvent = this.scene.time.addEvent({
+            delay: 33,
+            loop: true,
+            callback: () => {
+                if (!this.isRoundActive || !this.gameStateManager.isState(GAME_STATES.FLYING)) {
+                    return;
+                }
+                const elapsed = Math.max(0, performance.now() - startedAt);
+                if (!this.authoritativeTargetReached) {
+                    const progress = Phaser.Math.Clamp(elapsed / plan.durationMs, 0, 1);
+                    const liveMultiplier = 1 + ((plan.targetMultiplier - 1) * progress);
+                    this.interactionSystem.setAuthoritativeLiveMultiplier?.(liveMultiplier);
+                    if (progress >= 1) {
+                        this.authoritativeTargetReached = true;
+                        // Keep authoritative plan active, but stop rising multiplier.
+                        this.stopAuthoritativeFlightTickerOnly();
+                    }
+                } else {
+                    // Stay locked at crashPoint until the doll actually lands/stops.
+                    this.interactionSystem.setAuthoritativeLiveMultiplier?.(plan.targetMultiplier);
+                }
+
+                if (this.authoritativeTargetReached && !this.authoritativeForcedLandingApplied) {
+                    const groundY = Number(this.dollController?.getGroundY?.() ?? this.dollController?.groundY ?? 0);
+                    const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+                    const dollY = Number(this.dollController?.position?.y ?? threshold);
+                    if (dollY < (threshold - 8)) {
+                        const vx = Number(this.dollController?.velocity?.x ?? 0);
+                        const dir = vx >= 0 ? 1 : -1;
+                        // Force a controlled descent to avoid freezing in mid-air at crashPoint.
+                        this.dollController.applyImpulse?.(Math.max(110, Math.abs(vx)) * dir, 920, true);
+                    }
+                    this.authoritativeForcedLandingApplied = true;
+                }
+            }
         });
     }
 
@@ -126,6 +216,7 @@ export default class RoundManager {
             String(externalRoundData?.roundId || "")
             || `rnd_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
         this.externalRoundData = externalRoundData || null;
+        this.authoritativeFlightPlan = this.getAuthoritativeFlightPlan();
 
         // Client PDF callback name: autoplay started
         if (!isAutoplayStart) {
@@ -162,6 +253,16 @@ export default class RoundManager {
         this.dollController.reset();
         this.kickerController.reset();
         this.interactionSystem.loadPattern(this.currentPattern);
+        this.interactionSystem.setAuthoritativeRoundControl?.({
+            enabled: !!this.authoritativeFlightPlan,
+            targetMultiplier: this.authoritativeFlightPlan?.targetMultiplier ?? 1
+        });
+        if (this.authoritativeFlightPlan?.enabled) {
+            // Hard reset visible live multiplier so no stale value appears between rounds.
+            this.interactionSystem.setAuthoritativeLiveMultiplier?.(1);
+            this.uiManager.updateMultiplier?.(1);
+            this.dollController.updateScoreValue?.(1);
+        }
 
         const started = this.gameStateManager.setState(GAME_STATES.STARTING, "player_start_pressed");
         if (!started) {
@@ -222,9 +323,22 @@ export default class RoundManager {
         this.pushEvent(this.scene.time.delayedCall(kickStartMs + hitDelayMs, () => {
             this.gameStateManager.setState(GAME_STATES.FLYING, "doll_launch");
             this.dollController.launch();
+            if (this.authoritativeFlightPlan?.enabled) {
+                this.startAuthoritativeFlightController(this.authoritativeFlightPlan);
+            }
 
             this.dollController.onMovementComplete = () => {
                 if (this.dollController.isFallingInHole) {
+                    return;
+                }
+                if (this.authoritativeFlightPlan?.enabled) {
+                    const target = Number(this.authoritativeFlightPlan.targetMultiplier) || 1;
+                    const current = Number(this.interactionSystem.getMultiplier?.() ?? 1) || 1;
+                    if (current < (target - 0.01)) {
+                        this.interactionSystem.setAuthoritativeLiveMultiplier?.(target);
+                    }
+                    this.hitHazard = !!this.authoritativeFlightPlan.forceLoss;
+                    this.finishRound(this.hitHazard);
                     return;
                 }
                 // Round resolves only when the doll fully stops.
@@ -237,6 +351,9 @@ export default class RoundManager {
             };
 
             this.interactionSystem.onHazardHit = (item, isFatal) => {
+                if (this.authoritativeFlightPlan?.enabled) {
+                    return;
+                }
                 this.scene.shakeOnHazard();
                 if (isFatal) {
                     this.hitHazard = true;
@@ -260,8 +377,10 @@ export default class RoundManager {
 
         this.isRoundActive = false;
         this.hitHazard = hitHazard;
+        this.stopAuthoritativeFlightController();
         this.clearSequence();
         this.interactionSystem.stop();
+        this.interactionSystem.setAuthoritativeRoundControl?.({ enabled: false, targetMultiplier: 1 });
 
         const movedToRoundEnd = this.gameStateManager.setState(
             GAME_STATES.ROUND_END,
@@ -359,6 +478,7 @@ export default class RoundManager {
         this.pendingExternalStartFromAutoplay = false;
         this.externalStartTimeoutEvent?.remove?.(false);
         this.externalStartTimeoutEvent = null;
+        this.stopAuthoritativeFlightController();
         this.uiManager.setAwaitingExternalStart?.(false);
 
         this.scene.resetCamera();
@@ -375,6 +495,8 @@ export default class RoundManager {
         this.pendingExternalStartFromAutoplay = false;
         this.externalStartTimeoutEvent?.remove?.(false);
         this.externalStartTimeoutEvent = null;
+        this.stopAuthoritativeFlightController();
+        this.interactionSystem.setAuthoritativeRoundControl?.({ enabled: false, targetMultiplier: 1 });
         this.uiManager.setAwaitingExternalStart?.(false);
         this.uiManager.setAutoPlayRemaining?.(0);
         this.uiManager.clearAutoPlaySelection?.();
@@ -441,6 +563,7 @@ export default class RoundManager {
         }
 
         this.sequenceEvents.length = 0;
+        this.stopAuthoritativeFlightController();
         this.dollController.onMovementComplete = null;
         this.interactionSystem.onHazardHit = null;
     }

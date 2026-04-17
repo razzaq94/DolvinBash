@@ -158,6 +158,19 @@ export default class DollController {
         }
     }
 
+    ensureRenderableWhenActive() {
+        // Defensive guard: in some edge transitions (rapid replay/server-forced rounds),
+        // tween/mask leftovers can keep the doll hidden even though gameplay continues.
+        if (!this.doll || this.isFallingInHole) return;
+        const tooTransparent = (Number(this.doll.alpha) || 0) < 0.98;
+        const tooSmall = Math.abs(Number(this.doll.scaleX) || 0) < 0.02 || Math.abs(Number(this.doll.scaleY) || 0) < 0.02;
+        const hidden = !this.doll.visible;
+        if (hidden || tooTransparent || tooSmall) {
+            this.restoreVisibleVisualState();
+            this.syncVisuals();
+        }
+    }
+
     reset() {
         const groundY = this.getGroundY();
         const startX = this.getStartX();
@@ -370,6 +383,7 @@ export default class DollController {
         if (!this.isActive || !this.doll) {
             return;
         }
+        this.ensureRenderableWhenActive();
 
         this.elapsedMs += deltaSeconds * 1000;
         this.trailTimer += deltaSeconds;
