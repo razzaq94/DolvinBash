@@ -9,6 +9,13 @@ window.addEventListener("load", () => {
     const vh = Math.round(viewport?.height ?? window.innerHeight);
     const isPortrait = vh >= vw;
     const isSmallScreen = Math.min(vw, vh) <= 900;
+    const rawDpr = Number(window.devicePixelRatio) || 1;
+    const isMobileLike = isPortrait && isSmallScreen;
+    // Force high-DPI rendering across devices (desktop/tablet/mobile), with safe caps.
+    // Mobile gets a slightly lower cap to avoid GPU overload on weaker phones.
+    const renderResolution = isMobileLike
+        ? Math.max(1.5, Math.min(2.25, rawDpr))
+        : Math.max(1.5, Math.min(3, rawDpr));
 
     // PC/4K safe: fixed design size + ENVELOP.
     // Mobile portrait: keep the responsive RESIZE approach that was working for you.
@@ -22,11 +29,11 @@ window.addEventListener("load", () => {
         parent: "game-root",
         width: baseWidth,
         height: baseHeight,
-        // Force stable rendering across high-DPR devices (S24/4K with zoom/DPR changes).
-        // We intentionally keep internal resolution at 1 and let the browser scale the canvas.
-        resolution: 1,
+        // Render at device DPR (capped) to keep text/sprites crisp on iPad/tablet/mobile/PC.
+        resolution: renderResolution,
         render: {
             antialias: true,
+            antialiasGL: true,
             roundPixels: false
         },
         backgroundColor: GAME_CONFIG.backgroundColor,

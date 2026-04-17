@@ -86,6 +86,15 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.audio("sfx_loss", "src/sounds/gameover.mp3");
     }
 
+    tr(key, fallback) {
+        const map = (typeof window !== "undefined" && window.__dolvinTranslations && typeof window.__dolvinTranslations === "object")
+            ? window.__dolvinTranslations
+            : {};
+        const raw = map?.[key];
+        if (typeof raw === "string" && raw.trim().length) return raw;
+        return fallback;
+    }
+
     /**
      * Bat-only: linear texture filtering so scaled wing frames stay smooth (HD art on mobile + PC).
      */
@@ -203,19 +212,27 @@ export default class PreloadScene extends Phaser.Scene {
     drawLoadingText() {
         const width = this.scale.width;
         const height = this.scale.height;
+        const configuredRes = Number(this.game?.config?.resolution) || 1;
+        const dpr = Math.max(1.5, Math.min(3, configuredRes || (Number(window?.devicePixelRatio) || 1)));
 
         if (!this.loadingText) {
             this.loadingText = this.add.text(0, 0, "", {
                 fontSize: "32px",
                 color: "#ffffff"
             }).setOrigin(0.5);
+            // Crisp text on high-DPI iPads/phones.
+            this.loadingText.setResolution?.(dpr);
         }
         if (!this.loadingSubText) {
             this.loadingSubText = this.add.text(0, 0, "", {
                 fontSize: "18px",
                 color: "#cbd5e1"
             }).setOrigin(0.5);
+            this.loadingSubText.setResolution?.(dpr);
         }
+        // Keep text resolution aligned if DPR/resolution changes on rotate/zoom.
+        this.loadingText?.setResolution?.(dpr);
+        this.loadingSubText?.setResolution?.(dpr);
 
         if (!this.loadingBarBg) {
             this.loadingBarBg = this.add.rectangle(0, 0, 1, 1, 0x0f172a, 0.85).setStrokeStyle(2, 0xffffff, 0.25);
@@ -234,13 +251,16 @@ export default class PreloadScene extends Phaser.Scene {
         const fillW = Math.max(0, Math.round(barW * this.loadingProgress));
         const percentText = `${Math.round(this.loadingProgress * 100)}%`;
 
-        this.loadingText.setText(`Preparing Game Assets (${percentText})`);
+        this.loadingText.setText(`${this.tr("loadingAssets", "Preparing Game Assets")} (${percentText})`);
         this.loadingText.setPosition(width * 0.5, barY - (isMobile ? 46 : 52));
         this.loadingText.setStyle({
-            fontFamily: '"Luckiest Guy", cursive',
+            // Bubblegum Sans renders cleaner than Luckiest Guy on iPad canvas scaling.
+            fontFamily: '"Bubblegum Sans", cursive',
             fontSize: titleSize,
-            fontStyle: "600",
-            color: "#ffffff"
+            fontStyle: "700",
+            color: "#ffffff",
+            stroke: "#0f172a",
+            strokeThickness: isMobile ? 2 : 3
         });
 
         this.loadingSubText.setText("");

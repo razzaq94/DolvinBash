@@ -27,6 +27,8 @@ export default class UIManager {
 
         this.speedMode = GAME_CONFIG.round.defaultSpeedMode || "NORMAL";
         this.speedOverlay = null;
+        this.awaitingExternalStart = false;
+        this.translations = {};
     }
 
     createAll() {
@@ -47,6 +49,12 @@ export default class UIManager {
         if (!this.root) return;
         this.root.innerHTML = "";
         this.loadUiPrefs();
+        const hostMap = (window.__dolvinTranslations && typeof window.__dolvinTranslations === "object")
+            ? window.__dolvinTranslations
+            : null;
+        if (hostMap) {
+            this.translations = { ...this.translations, ...hostMap };
+        }
         this.createPrePlayLogos();
         this.createHeader();
         this.createBetPanel();
@@ -54,6 +62,7 @@ export default class UIManager {
         this.createInsufficientOverlay();
         this.updateBet(this.bet);
         this.updateBalance(this.balance);
+        this.applyTranslations();
     }
 
     loadUiPrefs() {
@@ -79,6 +88,56 @@ export default class UIManager {
         }
     }
 
+    tr(key, fallback = "") {
+        const raw = this.translations?.[key];
+        if (typeof raw === "string" && raw.trim().length) {
+            return raw;
+        }
+        return fallback;
+    }
+
+    setTranslations(map) {
+        if (!map || typeof map !== "object") return;
+        this.translations = { ...this.translations, ...map };
+        this.applyTranslations();
+    }
+
+    applyTranslations() {
+        const setText = (id, key, fallback) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = this.tr(key, fallback);
+        };
+        setText("ui-label-balance-top", "balance", "Balance");
+        setText("ui-label-multiplier-top", "multiplier", "Multiplier");
+        setText("ui-label-balance", "balance", "Balance");
+        setText("ui-label-bet", "bet", "Bet");
+        setText("ui-label-multiplier", "multiplier", "Multiplier");
+        setText("ui-label-res-bet", "bet", "Bet");
+        setText("ui-label-res-mult", "multiplier", "Multiplier");
+        setText("ui-label-res-dist", "distance", "Distance");
+        setText("ui-label-res-payout", "payout", "Payout");
+        setText("ui-btn-replay", "replay", "REPLAY");
+        setText("ui-insufficient-title", "insufficientBalanceTitle", "INSUFFICIENT BALANCE");
+        setText("ui-btn-insufficient-ok", "ok", "OK");
+        this.hudPanel?.setLabels?.({
+            multiplier: this.tr("multiplier", "Multiplier"),
+            combo: this.tr("combo", "Combo")
+        });
+
+        const muteBtn = document.getElementById("ui-btn-mute");
+        if (muteBtn) {
+            const label = this.tr("muteToggle", "Mute / Unmute");
+            muteBtn.title = label;
+            muteBtn.setAttribute("aria-label", label);
+        }
+
+        if (!document.getElementById("ui-result-overlay")?.classList?.contains("visible")) {
+            setText("ui-result-title", "roundEnded", "ROUND ENDED");
+        }
+
+        this.updatePlayButtonMode();
+    }
+
     getAssetUrl(relativePath) {
         const path = String(window.location.pathname || "/");
         const basePath = path.endsWith("/")
@@ -99,7 +158,7 @@ export default class UIManager {
                 src="${logoTopSrc}"
                 alt="Dolwin Bash Logo Top Right"
             />
-            <button id="ui-btn-mute" class="mute-btn" title="Mute / Unmute" aria-label="Mute / Unmute" style="margin-left:10px;">🔊</button>
+            <button id="ui-btn-mute" class="mute-btn" title="${this.tr("muteToggle", "Mute / Unmute")}" aria-label="${this.tr("muteToggle", "Mute / Unmute")}" style="margin-left:10px;">🔊</button>
         `;
         this.root.prepend(header);
 
@@ -142,11 +201,11 @@ export default class UIManager {
         mobileFloat.id = "ui-mobile-float-stats";
         mobileFloat.innerHTML = `
             <div class="mobile-stat glass-panel">
-                <div class="bet-label">Balance</div>
+                <div id="ui-label-balance-top" class="bet-label">${this.tr("balance", "Balance")}</div>
                 <div id="ui-balance-top" class="bet-value success">0.00</div>
             </div>
             <div class="mobile-stat glass-panel" style="text-align:right;">
-                <div class="bet-label">Multiplier</div>
+                <div id="ui-label-multiplier-top" class="bet-label">${this.tr("multiplier", "Multiplier")}</div>
                 <div id="ui-multiplier-top" class="bet-value warning">x1.00</div>
             </div>
         `;
@@ -161,7 +220,7 @@ export default class UIManager {
         betPanel.innerHTML = `
             <div id="ui-top-row" class="bet-section" data-multiplier="x1.00">
                 <div style="display:flex; flex-direction:column;">
-                    <span class="bet-label">Balance</span>
+                    <span id="ui-label-balance" class="bet-label">${this.tr("balance", "Balance")}</span>
                     <span id="ui-balance" class="bet-value success">0.00</span>
                 </div>
             </div>
@@ -169,17 +228,17 @@ export default class UIManager {
             <div class="controls-group">
                 <button id="ui-btn-minus" class="btn-mode btn-icon">−</button>
                 <div class="bet-section" style="text-align: center;">
-                    <span class="bet-label">Bet</span>
+                    <span id="ui-label-bet" class="bet-label">${this.tr("bet", "Bet")}</span>
                     <span id="ui-bet" class="bet-value">10</span>
                 </div>
                 <button id="ui-btn-plus" class="btn-mode btn-icon">+</button>
                 <button id="ui-btn-speed" class="btn-mode btn-icon">S</button>
                 <button id="ui-btn-autoplay" class="btn-mode btn-icon autoplay-btn"></button>
-                <button id="ui-btn-play" class="btn-main">PLAY</button>
+                <button id="ui-btn-play" class="btn-main">${this.tr("play", "PLAY")}</button>
             </div>
 
             <div class="bet-section desktop-only" style="text-align: right;">
-                <span class="bet-label">Multiplier</span>
+                <span id="ui-label-multiplier" class="bet-label">${this.tr("multiplier", "Multiplier")}</span>
                 <span id="ui-multiplier" class="bet-value warning">x1.00</span>
             </div>
         `;
@@ -236,14 +295,14 @@ export default class UIManager {
         overlay.id = "ui-result-overlay";
         overlay.innerHTML = `
             <div class="result-panel glass-panel" style="pointer-events: none;">
-                <h2 id="ui-result-title" class="result-title">ROUND ENDED</h2>
+                <h2 id="ui-result-title" class="result-title">${this.tr("roundEnded", "ROUND ENDED")}</h2>
                 <div class="result-stats">
-                    <div class="stat-item"><span class="stat-label">Bet</span><span id="res-bet" class="stat-value">0</span></div>
-                    <div class="stat-item"><span class="stat-label">Multiplier</span><span id="res-mult" class="stat-value">x0</span></div>
-                    <div class="stat-item"><span class="stat-label">Distance</span><span id="res-dist" class="stat-value">0</span></div>
-                    <div class="stat-item"><span class="stat-label">Payout</span><span id="res-payout" class="stat-value success">0</span></div>
+                    <div class="stat-item"><span id="ui-label-res-bet" class="stat-label">${this.tr("bet", "Bet")}</span><span id="res-bet" class="stat-value">0</span></div>
+                    <div class="stat-item"><span id="ui-label-res-mult" class="stat-label">${this.tr("multiplier", "Multiplier")}</span><span id="res-mult" class="stat-value">x0</span></div>
+                    <div class="stat-item"><span id="ui-label-res-dist" class="stat-label">${this.tr("distance", "Distance")}</span><span id="res-dist" class="stat-value">0</span></div>
+                    <div class="stat-item"><span id="ui-label-res-payout" class="stat-label">${this.tr("payout", "Payout")}</span><span id="res-payout" class="stat-value success">0</span></div>
                 </div>
-                <button id="ui-btn-replay" class="btn-main" style="width: 100%; pointer-events: auto;">REPLAY</button>
+                <button id="ui-btn-replay" class="btn-main" style="width: 100%; pointer-events: auto;">${this.tr("replay", "REPLAY")}</button>
             </div>
         `;
         this.root.appendChild(overlay);
@@ -305,11 +364,11 @@ export default class UIManager {
         overlay.id = "ui-insufficient-overlay";
         overlay.innerHTML = `
             <div class="result-panel glass-panel" style="max-width: 380px;">
-                <h2 id="ui-insufficient-title" class="result-title" style="font-size: 34px; color: var(--accent-danger);">INSUFFICIENT BALANCE</h2>
+                <h2 id="ui-insufficient-title" class="result-title" style="font-size: 34px; color: var(--accent-danger);">${this.tr("insufficientBalanceTitle", "INSUFFICIENT BALANCE")}</h2>
                 <div id="ui-insufficient-msg" class="stat-value" style="margin-bottom: 18px; text-align: center;">
-                    Please reduce bet amount.
+                    ${this.tr("insufficientBalanceHint", "Please reduce bet amount.")}
                 </div>
-                <button id="ui-btn-insufficient-ok" class="btn-main" style="width: 100%;">OK</button>
+                <button id="ui-btn-insufficient-ok" class="btn-main" style="width: 100%;">${this.tr("ok", "OK")}</button>
             </div>
         `;
         this.root.appendChild(overlay);
@@ -323,7 +382,10 @@ export default class UIManager {
         const overlay = document.getElementById("ui-insufficient-overlay");
         const msg = document.getElementById("ui-insufficient-msg");
         if (msg) {
-            msg.textContent = `Bet ${Number(betAmount).toFixed(2)} is greater than balance ${Number(balanceAmount).toFixed(2)}.`;
+            const template = this.tr("insufficientBalanceDetail", "Bet {bet} is greater than balance {balance}.");
+            msg.textContent = template
+                .replace("{bet}", Number(betAmount).toFixed(2))
+                .replace("{balance}", Number(balanceAmount).toFixed(2));
         }
         if (overlay) overlay.classList.add("visible");
     }
@@ -334,9 +396,18 @@ export default class UIManager {
     }
 
     bindEvents(roundManager) {
-        this.onStart = () => roundManager.startPrototypeRound();
+        this.onStart = () => roundManager.requestRoundStart?.();
         this.onReplay = () => roundManager.replay();
         this.onStopAutoPlay = () => roundManager.stopAutoPlay?.();
+    }
+
+    setAwaitingExternalStart(awaiting) {
+        this.awaitingExternalStart = !!awaiting;
+        this.updatePlayButtonMode();
+        const isBetting = !!this.scene.gameStateManager?.isState?.(GAME_STATES.BETTING);
+        if (isBetting) {
+            this.setPrePlayControlsEnabled(true);
+        }
     }
 
     updatePlayButtonMode() {
@@ -344,22 +415,33 @@ export default class UIManager {
         if (!playBtn) return;
         const isAutoRunning = this.autoPlayRemaining > 0;
         const canStartNow = !!this.scene.gameStateManager?.isState?.(GAME_STATES.BETTING);
-        playBtn.textContent = isAutoRunning ? "✕" : "PLAY";
-        playBtn.title = isAutoRunning ? "Stop autoplay" : "Play";
-        playBtn.setAttribute("aria-label", isAutoRunning ? "Stop autoplay" : "Play");
+        const waiting = this.awaitingExternalStart && !isAutoRunning;
+        playBtn.textContent = isAutoRunning
+            ? "✕"
+            : waiting
+                ? this.tr("waiting", "WAIT...")
+                : this.tr("play", "PLAY");
+        playBtn.title = isAutoRunning
+            ? this.tr("stopAutoplay", "Stop autoplay")
+            : waiting
+                ? this.tr("waitingServer", "Waiting for server...")
+                : this.tr("play", "Play");
+        playBtn.setAttribute("aria-label", playBtn.title);
         if (isAutoRunning) {
             playBtn.style.pointerEvents = "auto";
             playBtn.style.opacity = "";
             playBtn.disabled = false;
         } else {
             // After stopping autoplay mid-round, PLAY should stay non-interactable until BETTING.
-            playBtn.style.pointerEvents = canStartNow ? "auto" : "none";
-            playBtn.style.opacity = canStartNow ? "" : "0.6";
-            playBtn.disabled = !canStartNow;
+            const canUse = canStartNow && !waiting;
+            playBtn.style.pointerEvents = canUse ? "auto" : "none";
+            playBtn.style.opacity = canUse ? "" : "0.6";
+            playBtn.disabled = !canUse;
         }
     }
 
     setPrePlayControlsEnabled(enabled) {
+        const canUseControls = enabled && !this.awaitingExternalStart;
         const ids = [
             "ui-btn-minus",
             "ui-btn-plus",
@@ -372,10 +454,10 @@ export default class UIManager {
             const el = document.getElementById(id);
             if (!el) return;
             if ("disabled" in el) {
-                el.disabled = !enabled;
+                el.disabled = !canUseControls;
             }
-            el.style.pointerEvents = enabled ? "auto" : "none";
-            el.style.opacity = enabled ? "" : "0.6";
+            el.style.pointerEvents = canUseControls ? "auto" : "none";
+            el.style.opacity = canUseControls ? "" : "0.6";
         });
         // If autoplay is running, play button acts as an always-clickable stop (✕).
         if (this.autoPlayRemaining > 0) {
@@ -477,7 +559,9 @@ export default class UIManager {
     showResult(result) {
         const titleEl = document.getElementById("ui-result-title");
         if (titleEl) {
-            titleEl.textContent = result.hitHazard ? "ROUND OVER" : "YOU WON!";
+            titleEl.textContent = result.hitHazard
+                ? this.tr("roundOver", "ROUND OVER")
+                : this.tr("youWon", "YOU WON!");
             titleEl.style.color = result.hitHazard ? "var(--accent-danger)" : "var(--accent-success)";
         }
 
@@ -531,7 +615,7 @@ export default class UIManager {
 
         const title = document.createElement("div");
         title.className = "quickbet-title";
-        title.textContent = "Quick Bet";
+        title.textContent = this.tr("quickBet", "Quick Bet");
 
         const grid = document.createElement("div");
         grid.className = "quickbet-grid";
@@ -590,12 +674,15 @@ export default class UIManager {
 
         const title = document.createElement("div");
         title.className = "autoplay-title";
-        title.textContent = "Autoplay settings";
+        title.textContent = this.tr("autoplaySettings", "Autoplay settings");
 
         const closeBtn = document.createElement("button");
         closeBtn.className = "autoplay-close";
         closeBtn.type = "button";
         closeBtn.textContent = "×";
+        const closeLabel = this.tr("close", "Close");
+        closeBtn.title = closeLabel;
+        closeBtn.setAttribute("aria-label", closeLabel);
         closeBtn.addEventListener("click", () => {
             this.playUiClick();
             this.closeAutoPlay();
@@ -622,7 +709,7 @@ export default class UIManager {
 
         const sliderLabel = document.createElement("div");
         sliderLabel.className = "autoplay-subtitle";
-        sliderLabel.textContent = "Numbers of autospins:";
+        sliderLabel.textContent = this.tr("autoplaySpins", "Numbers of autospins:");
 
         const slider = document.createElement("input");
         slider.className = "autoplay-slider";
@@ -663,9 +750,9 @@ export default class UIManager {
         const startBtn = document.createElement("button");
         startBtn.className = "btn-main autoplay-start";
         startBtn.type = "button";
-        startBtn.textContent = `Start autoplay (${draftAutoPlayCount})`;
+        startBtn.textContent = `${this.tr("startAutoplay", "Start autoplay")} (${draftAutoPlayCount})`;
         const updateStartLabel = () => {
-            startBtn.textContent = `Start autoplay (${draftAutoPlayCount})`;
+            startBtn.textContent = `${this.tr("startAutoplay", "Start autoplay")} (${draftAutoPlayCount})`;
         };
         slider.addEventListener("input", updateStartLabel);
         grid.querySelectorAll("button.autoplay-chip").forEach((btn) => btn.addEventListener("click", updateStartLabel));
@@ -723,7 +810,7 @@ export default class UIManager {
 
         const title = document.createElement("div");
         title.className = "quickbet-title";
-        title.textContent = "Speed";
+        title.textContent = this.tr("speed", "Speed");
 
         const grid = document.createElement("div");
         grid.className = "quickbet-grid";
@@ -772,7 +859,7 @@ export default class UIManager {
             mode === "FAST" ? "F" :
             mode === "ULTRA" ? "U" :
             "N";
-        el.title = `Speed: ${mode}`;
+        el.title = this.tr("speedButtonTitle", "Speed: {mode}").replace("{mode}", mode);
     }
 
     setAutoPlayRemaining(remaining) {

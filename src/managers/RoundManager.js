@@ -23,13 +23,80 @@ export default class RoundManager {
         this.autoPlayRemaining = 0;
         this.currentRoundId = null;
         this.externalRoundData = null;
+        this.awaitingExternalStart = false;
+        this.externalStartTimeoutEvent = null;
+        this.pendingExternalStartFromAutoplay = false;
     }
 
-    startPrototypeRound({ fromAutoplay = false, externalRoundData = null } = {}) {
-        if (!this.gameStateManager.isState(GAME_STATES.BETTING)) {
-            console.warn("[RoundManager] Cannot start round. Current state is not BETTING.");
+    emitGameError(message) {
+        const fn = window?.onGameError;
+        if (typeof fn === "function") {
+            try {
+                fn(String(message || "Unknown game error"));
+            } catch (error) {
+                console.error("[RoundManager] host callback failed: onGameError", error);
+            }
+        }
+    }
+
+    requestRoundStart({ fromAutoplay = false } = {}) {
+        if (!this.gameStateManager.isState(GAME_STATES.BETTING)) return;
+        if (this.awaitingExternalStart) return;
+
+        const requestedBet = Number(this.uiManager.getCurrentBet?.() ?? 0) || 0;
+        const currentBalance = Number(this.uiManager.getCurrentBalance?.() ?? 0) || 0;
+        if (requestedBet > currentBalance) {
+            this.uiManager.showInsufficientBalance?.(requestedBet, currentBalance);
             return;
         }
+
+        this.awaitingExternalStart = true;
+        this.pendingExternalStartFromAutoplay = !!fromAutoplay;
+        this.uiManager.setAwaitingExternalStart?.(true);
+
+        const onRoundStart = window?.onRoundStart;
+        if (typeof onRoundStart === "function") {
+            try {
+                onRoundStart(requestedBet);
+            } catch (_) {
+                this.awaitingExternalStart = false;
+                this.uiManager.setAwaitingExternalStart?.(false);
+                this.pendingExternalStartFromAutoplay = false;
+                this.emitGameError("ROUND_START_CALLBACK_FAILED");
+                return;
+            }
+        }
+
+        this.externalStartTimeoutEvent?.remove?.(false);
+        this.externalStartTimeoutEvent = this.scene.time.delayedCall(12000, () => {
+            if (!this.awaitingExternalStart) return;
+            this.awaitingExternalStart = false;
+            this.pendingExternalStartFromAutoplay = false;
+            this.uiManager.setAwaitingExternalStart?.(false);
+            this.emitGameError("ROUND_START_TIMEOUT");
+        });
+    }
+
+    startPrototypeRound({ fromAutoplay = false, externalRoundData = null, fromPlatform = false } = {}) {
+        if (!this.gameStateManager.isState(GAME_STATES.BETTING)) {
+            console.warn("[RoundManager] Cannot start round. Current state is not BETTING.");
+            if (fromPlatform) {
+                this.emitGameError("INVALID_GAME_STATE_FOR_START");
+            }
+            return;
+        }
+
+        if (!fromAutoplay && !fromPlatform) {
+            this.requestRoundStart();
+            return;
+        }
+
+        const isAutoplayStart = !!fromAutoplay || !!this.pendingExternalStartFromAutoplay;
+        this.awaitingExternalStart = false;
+        this.pendingExternalStartFromAutoplay = false;
+        this.uiManager.setAwaitingExternalStart?.(false);
+        this.externalStartTimeoutEvent?.remove?.(false);
+        this.externalStartTimeoutEvent = null;
 
         const requestedBet = Number(this.uiManager.getCurrentBet?.() ?? 0) || 0;
         const currentBalance = Number(this.uiManager.getCurrentBalance?.() ?? 0) || 0;
@@ -37,7 +104,7 @@ export default class RoundManager {
             console.warn(`[RoundManager] Cannot start round. Bet (${requestedBet}) exceeds balance (${currentBalance}).`);
             this.uiManager.showInsufficientBalance?.(requestedBet, currentBalance);
             // If this was an autoplay attempt, stop chain immediately.
-            if (fromAutoplay) {
+            if (isAutoplayStart) {
                 this.autoPlayRemaining = 0;
                 this.uiManager.setAutoPlayRemaining?.(0);
                 this.uiManager.clearAutoPlaySelection?.();
@@ -61,7 +128,7 @@ export default class RoundManager {
         this.externalRoundData = externalRoundData || null;
 
         // Client PDF callback name: autoplay started
-        if (!fromAutoplay) {
+        if (!isAutoplayStart) {
             const selected = !!this.uiManager.getAutoPlaySelected?.();
             const spins = Math.max(1, Number(this.uiManager.getAutoPlayCount?.() ?? 1) || 1);
             if (selected && spins > 0) {
@@ -75,7 +142,7 @@ export default class RoundManager {
                 }
             }
         }
-        if (!fromAutoplay) {
+        if (!isAutoplayStart) {
             const desired = Math.max(1, Number(this.uiManager.getAutoPlayCount?.() ?? 1) || 1);
             // Show/run autoplay ONLY when user explicitly selected it (even if it's x1).
             const selected = !!this.uiManager.getAutoPlaySelected?.();
@@ -95,15 +162,6 @@ export default class RoundManager {
         this.dollController.reset();
         this.kickerController.reset();
         this.interactionSystem.loadPattern(this.currentPattern);
-
-        this.emitHostEvent("onDolvinRoundStart", {
-            roundId: this.currentRoundId,
-            betAmount: this.currentBet,
-            patternId: this.currentPattern?.id || "",
-            speedMode: this.currentSpeedMode,
-            volatility: this.currentVolatility,
-            state: "STARTING"
-        });
 
         const started = this.gameStateManager.setState(GAME_STATES.STARTING, "player_start_pressed");
         if (!started) {
@@ -275,7 +333,7 @@ export default class RoundManager {
             if (this.autoPlayRemaining > 0) {
                 this.pushEvent(this.scene.time.delayedCall(650, () => {
                     this.replay();
-                    this.startPrototypeRound({ fromAutoplay: true });
+                    this.requestRoundStart({ fromAutoplay: true });
                 }));
             }
 
@@ -297,6 +355,11 @@ export default class RoundManager {
         this.hitHazard = false;
         this.currentPattern = null;
         this.externalRoundData = null;
+        this.awaitingExternalStart = false;
+        this.pendingExternalStartFromAutoplay = false;
+        this.externalStartTimeoutEvent?.remove?.(false);
+        this.externalStartTimeoutEvent = null;
+        this.uiManager.setAwaitingExternalStart?.(false);
 
         this.scene.resetCamera();
         this.dollController.reset();
@@ -308,6 +371,11 @@ export default class RoundManager {
 
     stopAutoPlay() {
         this.autoPlayRemaining = 0;
+        this.awaitingExternalStart = false;
+        this.pendingExternalStartFromAutoplay = false;
+        this.externalStartTimeoutEvent?.remove?.(false);
+        this.externalStartTimeoutEvent = null;
+        this.uiManager.setAwaitingExternalStart?.(false);
         this.uiManager.setAutoPlayRemaining?.(0);
         this.uiManager.clearAutoPlaySelection?.();
     }
@@ -355,16 +423,7 @@ export default class RoundManager {
     }
 
     emitHostEvent(callbackName, payload) {
-        if (callbackName === "onDolvinRoundStart") {
-            const onRoundStart = window?.onRoundStart;
-            if (typeof onRoundStart === "function") {
-                try {
-                    onRoundStart(Number(payload?.betAmount) || 0);
-                } catch (error) {
-                    console.error("[RoundManager] host callback failed: onRoundStart", error);
-                }
-            }
-        } else if (callbackName === "onDolvinRoundEnd") {
+        if (callbackName === "onDolvinRoundEnd") {
             const onRoundEnd = window?.onRoundEnd;
             if (typeof onRoundEnd === "function") {
                 try {

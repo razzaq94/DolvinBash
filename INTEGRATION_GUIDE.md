@@ -107,6 +107,45 @@ window.updateAutoplayRemainingSpins(remainingSpins)
 
 - `remainingSpins` (`Number`)
 
+### 2.6 Set Translations
+
+```js
+window.setTranslations({
+  play: "Play",
+  replay: "Replay",
+  balance: "Balance",
+  bet: "Bet",
+  multiplier: "Multiplier",
+  combo: "Combo",
+  roundEnded: "Round ended",
+  roundOver: "Round over",
+  youWon: "You won!",
+  payout: "Payout",
+  distance: "Distance",
+  autoplaySettings: "Autoplay settings",
+  autoplaySpins: "Numbers of autospins:",
+  startAutoplay: "Start autoplay",
+  speed: "Speed",
+  speedButtonTitle: "Speed: {mode}",
+  loadingAssets: "Preparing Game Assets",
+  waiting: "WAIT...",
+  waitingServer: "Waiting for server...",
+  stopAutoplay: "Stop autoplay",
+  muteToggle: "Mute / Unmute",
+  close: "Close",
+  insufficientBalanceTitle: "INSUFFICIENT BALANCE",
+  insufficientBalanceHint: "Please reduce bet amount.",
+  insufficientBalanceDetail: "Bet {bet} is greater than balance {balance}.",
+  ok: "OK",
+  state: "State",
+  previous: "Prev"
+})
+```
+
+Behavior:
+- applies platform-provided language map to in-game UI text
+- can be called at `gameReady` and again when language changes
+
 ---
 
 ## 3. Round Flow (Per Client Spec)
@@ -118,7 +157,7 @@ window.updateAutoplayRemainingSpins(remainingSpins)
 5. Game calls `onRoundStart(betAmount)`  
 6. Platform validates and determines round result  
 7. Platform calls `startGame(roundId, betAmount, winAmount, crashPoint)`  
-8. Game plays animation  
+8. Game starts **only now** (server-authoritative round start) and plays animation  
 9. Game calls `onRoundEnd(roundId, winAmount)`  
 10. Platform settles wallet and may call `updateBalance(balance)` again
 
@@ -130,6 +169,7 @@ window.updateAutoplayRemainingSpins(remainingSpins)
 window.gameReady = async () => {
   const balance = await walletApi.getBalance();
   window.updateBalance(balance);
+  window.setTranslations(await i18nApi.getGameTranslations("dolwin-bash"));
 };
 
 window.onRoundStart = async (betAmount) => {

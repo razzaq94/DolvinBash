@@ -76,6 +76,12 @@ export default class DollController {
 
         // Short grace window right after launch where air hazards should not immediately force a drop.
         this.launchGraceRemainingMs = 0;
+
+        this.baseDepths = {
+            shadow: 25,
+            doll: 36,
+            face: 37
+        };
     }
 
     create() {
@@ -88,8 +94,8 @@ export default class DollController {
         this.velocity.set(0, 0);
 
         this.shadow = this.scene.add.ellipse(startX, groundY + 12, 54, 18, 0x000000, 0.22); // Lowered from +18
-        this.shadow.setDepth(25);
-        this.doll = this.scene.add.image(startX, startY, "doll_idle").setDepth(36);
+        this.shadow.setDepth(this.baseDepths.shadow);
+        this.doll = this.scene.add.image(startX, startY, "doll_idle").setDepth(this.baseDepths.doll);
         // HD sprites: allow sub-pixel positioning (render.roundPixels is off globally).
         this.doll.setRoundPixels?.(false);
         this.computeBaseDollScale();
@@ -98,7 +104,7 @@ export default class DollController {
         this.faceText = this.scene.add.text(startX, startY, ":|", {
             fontSize: "18px",
             color: "#0f172a"
-        }).setOrigin(0.5).setDepth(37).setVisible(false);
+        }).setOrigin(0.5).setDepth(this.baseDepths.face).setVisible(false);
 
         this.isActive = false;
         this.hasLaunched = false;
@@ -123,6 +129,33 @@ export default class DollController {
 
         this.syncVisuals();
         this.startIdleFloating();
+    }
+
+    restoreVisibleVisualState() {
+        if (this.doll) {
+            this.doll.clearMask?.(true);
+            this.doll.setDepth(this.baseDepths.doll);
+            this.doll.setAngle(0);
+            this.doll.setAlpha(1);
+            this.applyDollScale();
+            this.doll.setVisible(true);
+        }
+        if (this.shadow) {
+            this.shadow.setDepth(this.baseDepths.shadow);
+            this.shadow.setAlpha(0.22);
+            this.shadow.setVisible(true);
+        }
+        if (this.faceText) {
+            this.faceText.setDepth(this.baseDepths.face);
+            this.faceText.setVisible(false);
+            this.faceText.setAlpha(1);
+            this.faceText.setScale(1);
+        }
+        if (this.scoreContainer) {
+            this.scoreContainer.setVisible(true);
+            this.scoreContainer.setAlpha(1);
+            this.scoreContainer.setScale(1);
+        }
     }
 
     reset() {
@@ -164,31 +197,18 @@ export default class DollController {
 
         if (this.doll) {
             this.scene.tweens.killTweensOf(this.doll);
-            this.doll.clearMask?.(true);
-            this.doll.setAngle(0);
-            this.doll.setAlpha(1);
-            this.applyDollScale();
-            this.doll.setVisible(true);
         }
 
         if (this.shadow) {
             this.scene.tweens.killTweensOf(this.shadow);
-            this.shadow.setAlpha(0.22);
-            this.shadow.setVisible(true);
         }
 
         if (this.faceText) {
             this.scene.tweens.killTweensOf(this.faceText);
-            this.faceText.setVisible(false);
-            this.faceText.setAlpha(1);
-            this.faceText.setScale(1);
         }
 
         if (this.scoreContainer) {
             this.scene.tweens.killTweensOf(this.scoreContainer);
-            this.scoreContainer.setVisible(true);
-            this.scoreContainer.setAlpha(1);
-            this.scoreContainer.setScale(1);
         }
 
         if (this.holeMaskGfx) {
@@ -202,6 +222,7 @@ export default class DollController {
         this.holeVisual = null;
         this.holeVisualPrevDepth = null;
 
+        this.restoreVisibleVisualState();
         this.syncVisuals();
         this.clearScoreStack();
     }
@@ -224,6 +245,8 @@ export default class DollController {
 
     launch() {
         this.stopIdleFloating();
+        // Defensive restore: prevent stale hidden state between rounds.
+        this.restoreVisibleVisualState();
         this.hasLaunched = true;
         this.isActive = true;
         this.elapsedMs = 0;

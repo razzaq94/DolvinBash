@@ -20,11 +20,27 @@ export default class BridgeManager {
         window.updateAutoplayRemainingSpins = (remainingSpins) => {
             this.roundManager.uiManager?.setAutoPlayRemaining?.(remainingSpins);
         };
+        window.setTranslations = (translations) => {
+            const next = (translations && typeof translations === "object") ? translations : {};
+            const prev = (window.__dolvinTranslations && typeof window.__dolvinTranslations === "object")
+                ? window.__dolvinTranslations
+                : {};
+            window.__dolvinTranslations = { ...prev, ...next };
+            try {
+                window.dispatchEvent(new CustomEvent("dolvin:translations-updated", {
+                    detail: window.__dolvinTranslations
+                }));
+            } catch (_) {
+                // ignore dispatch errors in restrictive hosts
+            }
+            this.roundManager.uiManager?.setTranslations?.(translations);
+        };
         window.startGame = (roundId, betAmount, winAmount, crashPoint) => {
             if (Number.isFinite(Number(betAmount))) {
                 this.roundManager.uiManager?.setBet?.(Number(betAmount));
             }
             this.roundManager.startPrototypeRound({
+                fromPlatform: true,
                 externalRoundData: {
                     roundId,
                     betAmount: Number(betAmount),

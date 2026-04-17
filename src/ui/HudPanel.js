@@ -5,6 +5,10 @@ export default class HudPanel {
         this.multiplier = 1;
         this.comboCount = 0;
         this.comboRatio = 0;
+        this.labels = {
+            multiplier: "Multiplier",
+            combo: "Combo"
+        };
 
         // Placeholder y; layout() runs immediately (below HTML logo).
         this.text = scene.add.text(0, 0, "", {
@@ -122,9 +126,17 @@ export default class HudPanel {
         this.update();
     }
 
+    setLabels(nextLabels = {}) {
+        this.labels = {
+            ...this.labels,
+            ...nextLabels
+        };
+        this.update();
+    }
+
     update() {
-        this.text.setText(`Multiplier: x${this.multiplier}`);
-        this.comboText.setText(this.comboCount > 0 ? `Combo: ${this.comboCount}` : "");
+        this.text.setText(`${this.labels.multiplier}: x${this.multiplier}`);
+        this.comboText.setText(this.comboCount > 0 ? `${this.labels.combo}: ${this.comboCount}` : "");
         const barW = this.comboBarBg.width || 140;
         this.comboBarFill.width = this.comboCount > 0 ? barW * this.comboRatio : 0;
     }
