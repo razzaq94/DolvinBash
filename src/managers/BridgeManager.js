@@ -7,6 +7,19 @@ export default class BridgeManager {
     }
 
     init() {
+        const toFiniteNumber = (value) => {
+            if (typeof value === "number") {
+                return Number.isFinite(value) ? value : NaN;
+            }
+            if (typeof value === "string") {
+                const normalized = value.trim().replace(",", ".");
+                const parsed = Number(normalized);
+                return Number.isFinite(parsed) ? parsed : NaN;
+            }
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : NaN;
+        };
+
         // Platform -> Game functions (strictly per client integration spec).
         window.updateBalance = (balance) => {
             this.roundManager.uiManager?.updateBalance?.(balance);
@@ -36,16 +49,20 @@ export default class BridgeManager {
             this.roundManager.uiManager?.setTranslations?.(translations);
         };
         window.startGame = (roundId, betAmount, winAmount, crashPoint) => {
-            if (Number.isFinite(Number(betAmount))) {
-                this.roundManager.uiManager?.setBet?.(Number(betAmount));
+            const bet = toFiniteNumber(betAmount);
+            const win = toFiniteNumber(winAmount);
+            const crash = toFiniteNumber(crashPoint);
+
+            if (Number.isFinite(bet)) {
+                this.roundManager.uiManager?.setBet?.(bet);
             }
             this.roundManager.startPrototypeRound({
                 fromPlatform: true,
                 externalRoundData: {
                     roundId,
-                    betAmount: Number(betAmount),
-                    winAmount: Number(winAmount),
-                    crashPoint: Number(crashPoint)
+                    betAmount: bet,
+                    winAmount: win,
+                    crashPoint: crash
                 }
             });
         };

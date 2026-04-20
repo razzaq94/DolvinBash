@@ -30,6 +30,7 @@ export default class RoundManager {
         this.authoritativeFlightPlan = null;
         this.authoritativeTargetReached = false;
         this.authoritativeForcedLandingApplied = false;
+        this.authoritativeStartAtMs = 0;
     }
 
     emitGameError(message) {
@@ -41,6 +42,19 @@ export default class RoundManager {
                 console.error("[RoundManager] host callback failed: onGameError", error);
             }
         }
+    }
+
+    parseExternalNumber(value) {
+        if (typeof value === "number") {
+            return Number.isFinite(value) ? value : NaN;
+        }
+        if (typeof value === "string") {
+            const normalized = value.trim().replace(",", ".");
+            const parsed = Number(normalized);
+            return Number.isFinite(parsed) ? parsed : NaN;
+        }
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : NaN;
     }
 
     requestRoundStart({ fromAutoplay = false } = {}) {
@@ -83,19 +97,23 @@ export default class RoundManager {
 
     getAuthoritativeFlightPlan() {
         const ext = this.externalRoundData;
-        const crashPoint = Number(ext?.crashPoint);
+        const crashPoint = this.parseExternalNumber(ext?.crashPoint);
         if (!Number.isFinite(crashPoint) || crashPoint <= 0) {
             return null;
         }
         const targetMultiplier = Math.max(1, Number(crashPoint.toFixed(2)));
-        const winAmount = Number(ext?.winAmount);
+        const winAmount = this.parseExternalNumber(ext?.winAmount);
         const forceLoss = Number.isFinite(winAmount) ? winAmount <= 0 : false;
         // Keep a deterministic and smooth flight window while ending exactly on crashPoint.
-        const durationMs = Phaser.Math.Clamp(
+        let durationMs = Phaser.Math.Clamp(
             Math.round(650 + ((targetMultiplier - 1) * 260)),
             650,
             6500
         );
+        // Loss rounds should crash fast (platform signal: crashPoint=1, winAmount=0).
+        if (forceLoss && targetMultiplier <= 1.01) {
+            durationMs = 320;
+        }
         return {
             enabled: true,
             targetMultiplier,
@@ -110,6 +128,7 @@ export default class RoundManager {
         this.authoritativeFlightPlan = null;
         this.authoritativeTargetReached = false;
         this.authoritativeForcedLandingApplied = false;
+        this.authoritativeStartAtMs = 0;
     }
 
     stopAuthoritativeFlightTickerOnly() {
@@ -122,13 +141,13 @@ export default class RoundManager {
         this.authoritativeFlightPlan = plan;
         this.authoritativeTargetReached = false;
         this.authoritativeForcedLandingApplied = false;
+        this.authoritativeStartAtMs = performance.now();
         this.interactionSystem.setAuthoritativeRoundControl?.({
             enabled: true,
             targetMultiplier: plan.targetMultiplier
         });
         this.interactionSystem.setAuthoritativeLiveMultiplier?.(1);
 
-        const startedAt = performance.now();
         this.authoritativeFlightEvent = this.scene.time.addEvent({
             delay: 33,
             loop: true,
@@ -136,15 +155,14 @@ export default class RoundManager {
                 if (!this.isRoundActive || !this.gameStateManager.isState(GAME_STATES.FLYING)) {
                     return;
                 }
-                const elapsed = Math.max(0, performance.now() - startedAt);
+                const elapsed = Math.max(0, performance.now() - this.authoritativeStartAtMs);
                 if (!this.authoritativeTargetReached) {
                     const progress = Phaser.Math.Clamp(elapsed / plan.durationMs, 0, 1);
                     const liveMultiplier = 1 + ((plan.targetMultiplier - 1) * progress);
                     this.interactionSystem.setAuthoritativeLiveMultiplier?.(liveMultiplier);
+                    this.sustainAuthoritativeFlight(plan, progress);
                     if (progress >= 1) {
                         this.authoritativeTargetReached = true;
-                        // Keep authoritative plan active, but stop rising multiplier.
-                        this.stopAuthoritativeFlightTickerOnly();
                     }
                 } else {
                     // Stay locked at crashPoint until the doll actually lands/stops.
@@ -152,19 +170,53 @@ export default class RoundManager {
                 }
 
                 if (this.authoritativeTargetReached && !this.authoritativeForcedLandingApplied) {
-                    const groundY = Number(this.dollController?.getGroundY?.() ?? this.dollController?.groundY ?? 0);
-                    const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
-                    const dollY = Number(this.dollController?.position?.y ?? threshold);
-                    if (dollY < (threshold - 8)) {
-                        const vx = Number(this.dollController?.velocity?.x ?? 0);
-                        const dir = vx >= 0 ? 1 : -1;
-                        // Force a controlled descent to avoid freezing in mid-air at crashPoint.
-                        this.dollController.applyImpulse?.(Math.max(110, Math.abs(vx)) * dir, 920, true);
+                    const vx = Number(this.dollController?.velocity?.x ?? 0);
+                    const dir = vx >= 0 ? 1 : -1;
+                    const downY = plan.forceLoss ? 1120 : 920;
+                    // Force a controlled end descent after crashPoint is reached.
+                    const downX = plan.forceLoss ? Math.max(40, Math.abs(vx) * 0.28) : Math.max(120, Math.abs(vx));
+                    this.dollController.applyImpulse?.(downX * dir, downY, true);
+                    if (plan.forceLoss) {
+                        this.scene.shakeOnHazard?.();
+                        this.dollController.onGameplayInteraction?.("hazard");
                     }
                     this.authoritativeForcedLandingApplied = true;
                 }
+
+                // Immediate-loss intent: crashPoint=1 + winAmount=0 should finish quickly after touchdown.
+                if (this.authoritativeTargetReached && plan.forceLoss) {
+                    const groundY = Number(this.dollController?.getGroundY?.() ?? this.dollController?.groundY ?? 0);
+                    const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+                    const dollY = Number(this.dollController?.position?.y ?? threshold);
+                    if (dollY >= (threshold - 1.5)) {
+                        this.hitHazard = true;
+                        this.dollController.stopImmediatelyDead?.();
+                        this.finishRound(true);
+                    }
+                }
             }
         });
+    }
+
+    sustainAuthoritativeFlight(plan, progress) {
+        const dc = this.dollController;
+        if (!dc?.doll) return;
+        const groundY = Number(dc.getGroundY?.() ?? dc.groundY ?? 0);
+        const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+        const dollY = Number(dc.position?.y ?? threshold);
+        const nearGround = dollY >= (threshold - 14);
+        if (!nearGround) return;
+
+        const vx = Number(dc.velocity?.x ?? 0);
+        const dir = vx >= 0 ? 1 : -1;
+        const targetMul = Math.max(1, Number(plan.targetMultiplier) || 1);
+        const mulRatio = Phaser.Math.Clamp((targetMul - 1) / 24, 0, 1);
+        const progressRatio = Phaser.Math.Clamp(progress, 0, 1);
+        const sustainPower = Math.round(520 + (220 * mulRatio) + (160 * progressRatio));
+        const sustainForward = Math.max(160, 170 + (targetMul * 4));
+        // Hop sustain: keeps visible flight length scaling with crashPoint duration.
+        dc.applyImpulse?.(sustainForward * dir, -sustainPower, true);
+        dc.setExpression?.("determined");
     }
 
     startPrototypeRound({ fromAutoplay = false, externalRoundData = null, fromPlatform = false } = {}) {
@@ -217,6 +269,11 @@ export default class RoundManager {
             || `rnd_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
         this.externalRoundData = externalRoundData || null;
         this.authoritativeFlightPlan = this.getAuthoritativeFlightPlan();
+        if (fromPlatform && !this.authoritativeFlightPlan) {
+            this.emitGameError("INVALID_EXTERNAL_ROUND_DATA");
+            this.isRoundActive = false;
+            return;
+        }
 
         // Client PDF callback name: autoplay started
         if (!isAutoplayStart) {
@@ -332,6 +389,16 @@ export default class RoundManager {
                     return;
                 }
                 if (this.authoritativeFlightPlan?.enabled) {
+                    if (!this.authoritativeTargetReached) {
+                        const elapsed = Math.max(0, performance.now() - this.authoritativeStartAtMs);
+                        const progress = Phaser.Math.Clamp(
+                            elapsed / Math.max(1, Number(this.authoritativeFlightPlan.durationMs) || 1),
+                            0,
+                            1
+                        );
+                        this.sustainAuthoritativeFlight(this.authoritativeFlightPlan, progress);
+                        return;
+                    }
                     const target = Number(this.authoritativeFlightPlan.targetMultiplier) || 1;
                     const current = Number(this.interactionSystem.getMultiplier?.() ?? 1) || 1;
                     if (current < (target - 0.01)) {
@@ -508,9 +575,12 @@ export default class RoundManager {
             return baseResult;
         }
 
-        const bet = Math.max(0, Number(ext.betAmount) || Number(baseResult?.betAmount) || this.currentBet || 0);
-        let win = Number(ext.winAmount);
-        const crashPoint = Number(ext.crashPoint);
+        const bet = Math.max(
+            0,
+            this.parseExternalNumber(ext.betAmount) || Number(baseResult?.betAmount) || this.currentBet || 0
+        );
+        let win = this.parseExternalNumber(ext.winAmount);
+        const crashPoint = this.parseExternalNumber(ext.crashPoint);
 
         if (!Number.isFinite(win)) {
             if (Number.isFinite(crashPoint) && crashPoint > 0) {
