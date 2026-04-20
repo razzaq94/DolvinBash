@@ -171,6 +171,20 @@ export default class DollController {
         }
     }
 
+    forceVisibleNow() {
+        if (!this.doll || this.isFallingInHole) return;
+        this.doll.clearMask?.(true);
+        this.doll.setVisible(true);
+        this.doll.setAlpha(1);
+        if (Math.abs(Number(this.doll.scaleX) || 0) < 0.02 || Math.abs(Number(this.doll.scaleY) || 0) < 0.02) {
+            this.applyDollScale();
+        }
+        if (this.shadow) {
+            this.shadow.setVisible(true);
+            this.shadow.setAlpha(0.22);
+        }
+    }
+
     reset() {
         const groundY = this.getGroundY();
         const startX = this.getStartX();
@@ -260,6 +274,7 @@ export default class DollController {
         this.stopIdleFloating();
         // Defensive restore: prevent stale hidden state between rounds.
         this.restoreVisibleVisualState();
+        this.forceVisibleNow();
         this.hasLaunched = true;
         this.isActive = true;
         this.elapsedMs = 0;
@@ -942,6 +957,8 @@ export default class DollController {
         if (!this.doll || !this.shadow || !this.faceText) {
             return;
         }
+        // Hard guarantee for gameplay visibility in non-hole states.
+        this.forceVisibleNow();
 
         this.doll.setPosition(this.position.x, this.position.y);
         this.faceText.setPosition(this.position.x, this.position.y);

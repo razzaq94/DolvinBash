@@ -40,7 +40,8 @@ export default class InteractionSystem {
         this.prevDollY = null;
         this.authoritativeRound = {
             enabled: false,
-            targetMultiplier: 1
+            targetMultiplier: 1,
+            forceLoss: false
         };
 
         // Debug overlay/logging for air-lane (+1/x/-1) hits.
@@ -1162,9 +1163,10 @@ export default class InteractionSystem {
         this.volatilityTuning = GAME_CONFIG.volatilityModes?.[volatility] || GAME_CONFIG.volatilityModes?.NORMAL || {};
     }
 
-    setAuthoritativeRoundControl({ enabled = false, targetMultiplier = 1 } = {}) {
+    setAuthoritativeRoundControl({ enabled = false, targetMultiplier = 1, forceLoss = false } = {}) {
         this.authoritativeRound.enabled = !!enabled;
         this.authoritativeRound.targetMultiplier = this.clampMultiplier(Math.max(1, Number(targetMultiplier) || 1));
+        this.authoritativeRound.forceLoss = !!forceLoss;
     }
 
     setAuthoritativeLiveMultiplier(value) {
@@ -1200,16 +1202,6 @@ export default class InteractionSystem {
         this.maintainBombStream(dollX);
         this.maintainBatStream(dollX);
         this.updateComboTimer(deltaSeconds);
-
-        // Strict server-authoritative mode:
-        // Do NOT let local obstacle collisions alter physics/flight path.
-        // Flight timeline/landing are controlled by RoundManager crashPoint controller.
-        if (this.authoritativeRound.enabled) {
-            this.prevDollX = dollX;
-            this.prevDollY = dollY;
-            this.maintainSkyMultiplierStream(dollX);
-            return;
-        }
 
         const dollCircleRadius = this.getDollCircleRadius();
 
@@ -1403,7 +1395,23 @@ export default class InteractionSystem {
                     (it) => (it.variant === "hole" || it.variant === "trafficcone" || it.variant === "roadblocker")
                 );
 
-        if (!this.authoritativeRound.enabled && roadHit && !roadHit.hasCollided) {
+        const groundYForWinCleanup = this.getGroundY();
+        const collisionThresholdForWinCleanup = groundYForWinCleanup - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+        const nearGroundForWinCleanup = dollY >= (collisionThresholdForWinCleanup - 26);
+        const isAuthoritativeWinPostCrash =
+            this.authoritativeRound.enabled
+            && !this.authoritativeRound.forceLoss
+            && this.multiplier >= (this.authoritativeRound.targetMultiplier - 0.01);
+        if (isAuthoritativeWinPostCrash && nearGroundForWinCleanup) {
+            // Server decided WIN: after crashPoint, hide road obstacles only at landing phase.
+            this.clearRoadHazardsForAuthoritativeWin(dollX);
+            if (roadHit && !roadHit.hasCollided) {
+                roadHit.hasCollided = true;
+                this.consumeObject(roadHit);
+            }
+        }
+
+        if (!isAuthoritativeWinPostCrash && roadHit && !roadHit.hasCollided) {
             const item = roadHit;
             const groundY = this.getGroundY();
             const collisionThreshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
@@ -1412,21 +1420,45 @@ export default class InteractionSystem {
             const nearGround = dollY >= (collisionThreshold - 72);
             const isRollingOnRoad =
                 (isOnGround || nearGround) && Math.abs(this.dollController?.velocity?.x ?? 0) > 18;
+            const allowFatalRoadHit = !this.authoritativeRound.enabled || this.authoritativeRound.forceLoss;
 
             // CRITICAL: only set hasCollided after we commit to a real hit.
             // Old code marked collided even when skipping mid-air → pass-through + fake wins.
 
             const applyRoadFatal = () => {
+                if (!allowFatalRoadHit) {
+                    // Hybrid-authoritative behavior:
+                    // keep visible/physical contact feedback during the journey,
+                    // but do not let local road hazards end the round before crashPoint.
+                    item.hasCollided = true;
+                    this.resetCombo();
+                    this.spawnImpactParticles("hazard", item.x, item.y);
+                    this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
+                    this.scene.shakeOnHazard?.();
+                    const vx = Number(this.dollController?.velocity?.x ?? 0);
+                    const dir = vx >= 0 ? 1 : -1;
+                    const hitX = Math.max(85, Math.abs(vx) * 0.42);
+                    const hitY = item.variant === "hole" ? 300 : 230;
+                    // Strong but controlled impact to preserve obstacle contact feel.
+                    this.dollController.applyImpulse?.(hitX * dir, hitY, true);
+                    this.dollController.onGameplayInteraction?.("hazard");
+                    this.dollController.setTrailTheme?.("minus", 0);
+                    return false;
+                }
                 item.hasCollided = true;
                 this.spawnImpactParticles("hazard", item.x, item.y);
                 this.dollController.onGameplayInteraction?.("hazard");
                 this.dollController.setTrailTheme?.("minus", 0);
                 this.resetCombo();
+                return true;
             };
 
             if (item.variant === "hole") {
                 if (isOnGround || nearGround) {
-                    applyRoadFatal();
+                    const fatal = applyRoadFatal();
+                    if (!fatal) {
+                        return;
+                    }
                     this.dollController.disableTrailsNow?.();
                     this.interactionsEnabled = false;
                     this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
@@ -1435,7 +1467,10 @@ export default class InteractionSystem {
             } else if (item.variant === "trafficcone" || item.variant === "roadblocker") {
                 // Cone / barricade: on/near ground + horizontal motion (rolling), not mid-air grazes.
                 if ((isOnGround || nearGround) && isRollingOnRoad) {
-                    applyRoadFatal();
+                    const fatal = applyRoadFatal();
+                    if (!fatal) {
+                        return;
+                    }
                     this.interactionsEnabled = false;
                     this.scene.audioManager?.play("sfx_hazard", { volume: 0.8 });
                     this.onHazardHit?.(item, true);
@@ -3333,6 +3368,86 @@ export default class InteractionSystem {
 
     getGroundY() {
         return this.scene.getGroundY();
+    }
+
+    getBestAuthoritativeLossHazard(dollX = 0) {
+        if (!Array.isArray(this.hazards) || !this.hazards.length) return null;
+        let bestHole = null;
+        let bestHoleDist = Number.POSITIVE_INFINITY;
+        let bestAny = null;
+        let bestAnyDist = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < this.hazards.length; i++) {
+            const h = this.hazards[i];
+            if (!h?.active) continue;
+            const v = String(h.variant || "");
+            if (!(v === "hole" || v === "trafficcone" || v === "roadblocker")) continue;
+            const dist = Math.abs((Number(h.x) || 0) - (Number(dollX) || 0));
+            if (v === "hole" && dist < bestHoleDist) {
+                bestHoleDist = dist;
+                bestHole = h;
+            }
+            if (dist < bestAnyDist) {
+                bestAnyDist = dist;
+                bestAny = h;
+            }
+        }
+        return bestHole || bestAny || null;
+    }
+
+    clearRoadHazardsForAuthoritativeWin(dollX = 0) {
+        if (!Array.isArray(this.hazards) || !this.hazards.length) return;
+        for (let i = 0; i < this.hazards.length; i++) {
+            const h = this.hazards[i];
+            if (!h?.active) continue;
+            const v = String(h.variant || "");
+            if (!(v === "hole" || v === "trafficcone" || v === "roadblocker")) continue;
+            h.hasCollided = true;
+            this.consumeObject(h);
+        }
+    }
+
+    ensureAuthoritativeLossHazardNear(dollX = 0, dir = 1, { forceSpawn = false } = {}) {
+        const lookDir = dir >= 0 ? 1 : -1;
+        if (!forceSpawn) {
+            const existing = this.getBestAuthoritativeLossHazard(dollX);
+            if (existing) {
+                const dx = (Number(existing.x) || 0) - (Number(dollX) || 0);
+                const inForwardLane = (dx * lookDir) >= -28;
+                if (inForwardLane && Math.abs(dx) <= 190) {
+                    return existing;
+                }
+            }
+        }
+
+        const cam = this.scene.cameras?.main;
+        const viewX = Number(cam?.scrollX ?? 0);
+        const viewW = Number(cam?.width ?? 1080);
+        const minX = viewX + (viewW * 0.22);
+        const maxX = viewX + (viewW * 0.88);
+        const vx = Number(this.dollController?.velocity?.x ?? 0);
+        // Roll-stage loss: spawn close enough to hit before roll naturally stops.
+        const offset = Phaser.Math.Clamp(Math.abs(vx) * 0.22, 76, 140);
+        const rawX = Number(dollX) + (offset * lookDir);
+        const spawnX = Phaser.Math.Clamp(rawX, minX, maxX);
+
+        const variant = Math.random() < 0.45 ? "roadblocker" : "trafficcone";
+        const visual = this.getHazardVisual(variant);
+        const spawned = this.createHazardObject(
+            spawnX,
+            this.getGroundY(),
+            visual.width,
+            visual.height,
+            visual.texture || null,
+            visual.label || "BLOCK",
+            "hazard",
+            0,
+            variant
+        );
+        spawned.hasCollided = false;
+        spawned.active = true;
+        spawned.authoritativeInjected = true;
+        this.hazards.push(spawned);
+        return spawned;
     }
 
     relayout() {
