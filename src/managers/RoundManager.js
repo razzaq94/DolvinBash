@@ -163,7 +163,8 @@ export default class RoundManager {
         this.interactionSystem.setAuthoritativeRoundControl?.({
             enabled: true,
             targetMultiplier: plan.targetMultiplier,
-            forceLoss: !!plan.forceLoss
+            forceLoss: !!plan.forceLoss,
+            durationMs: plan.durationMs
         });
         this.interactionSystem.setAuthoritativeLiveMultiplier?.(1);
 
@@ -175,17 +176,13 @@ export default class RoundManager {
                     return;
                 }
                 const elapsed = Math.max(0, performance.now() - this.authoritativeStartAtMs);
+                this.interactionSystem.setAuthoritativeTimelineProgress?.(elapsed, plan.durationMs);
                 if (!this.authoritativeTargetReached) {
                     const progress = Phaser.Math.Clamp(elapsed / plan.durationMs, 0, 1);
-                    const liveMultiplier = 1 + ((plan.targetMultiplier - 1) * progress);
-                    this.interactionSystem.setAuthoritativeLiveMultiplier?.(liveMultiplier);
                     this.sustainAuthoritativeFlight(plan, progress);
                     if (progress >= 1) {
                         this.authoritativeTargetReached = true;
                     }
-                } else {
-                    // Stay locked at crashPoint until the doll actually lands/stops.
-                    this.interactionSystem.setAuthoritativeLiveMultiplier?.(plan.targetMultiplier);
                 }
 
                 if (
@@ -382,7 +379,8 @@ export default class RoundManager {
         this.interactionSystem.setAuthoritativeRoundControl?.({
             enabled: !!this.authoritativeFlightPlan,
             targetMultiplier: this.authoritativeFlightPlan?.targetMultiplier ?? 1,
-            forceLoss: !!this.authoritativeFlightPlan?.forceLoss
+            forceLoss: !!this.authoritativeFlightPlan?.forceLoss,
+            durationMs: this.authoritativeFlightPlan?.durationMs ?? 0
         });
         if (this.authoritativeFlightPlan?.enabled) {
             // Hard reset visible live multiplier so no stale value appears between rounds.
