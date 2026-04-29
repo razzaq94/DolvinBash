@@ -49,6 +49,7 @@ export default class InteractionSystem {
 
         // Debug overlay/logging for air-lane (+1/x/-1) hits.
         this.airHitDebugGfx = null;
+        this.currentPlannedStepIndex = 0;
     }
 
     create() {
@@ -231,6 +232,7 @@ export default class InteractionSystem {
     }
 
     initBombStream(groundY) {
+        if (this.authoritativeRound.enabled) return;
         if (!this.proceduralBombs.length) {
             // Bigger pool so bombs can stay dense throughout.
             const poolCount = 90;
@@ -265,6 +267,7 @@ export default class InteractionSystem {
     }
 
     initBatStream(groundY) {
+        if (this.authoritativeRound.enabled) return;
         const batCfg = GAME_CONFIG.bat || {};
         const sc = batCfg.stream || {};
         const poolCount = sc.poolCount ?? 90;
@@ -341,10 +344,10 @@ export default class InteractionSystem {
 
         const text = this.scene.add.text(x, y, label, {
             fontFamily: '"Luckiest Guy", cursive',
-            fontSize: "34px",
+            fontSize: "48px", // Standardized Large Size
             color: fillColor,
             stroke: shadowColor,
-            strokeThickness: 2,
+            strokeThickness: 6,
             shadow: {
                 offsetX: 3,
                 offsetY: 3,
@@ -424,7 +427,7 @@ export default class InteractionSystem {
             fontSize: "48px",
             color: fillColor,
             stroke: shadowColor,
-            strokeThickness: 2,
+            strokeThickness: 6,
             shadow: {
                 offsetX: 4,
                 offsetY: 4,
@@ -594,9 +597,11 @@ export default class InteractionSystem {
         ];
 
         const text = this.scene.add.text(x, y, itemData?.label || "", {
-            fontFamily: '"Bubblegum Sans", cursive',
-            fontSize: "42px",
-            color: "#ffffff"
+            fontFamily: '"Luckiest Guy", cursive',
+            fontSize: "48px",
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 6
         }).setOrigin(0.5).setDepth(36).setVisible(false);
 
         let shape;
@@ -726,6 +731,7 @@ export default class InteractionSystem {
     }
 
     spawnSkyMultipliers(groundY) {
+        if (this.authoritativeRound.enabled) return;
         const cfg = GAME_CONFIG.skyMultipliers;
         if (!cfg?.enabled || !Array.isArray(cfg.pool) || cfg.pool.length === 0) {
             return;
@@ -819,9 +825,9 @@ export default class InteractionSystem {
     }
 
     getRandomSkyYOffset(cfg) {
+        const groundY = this.getGroundY();
         const minYOffset = cfg?.minYOffset ?? -450;
         const maxYOffset = cfg?.maxYOffset ?? -180;
-        const groundY = this.getGroundY();
         const layout = this.scene.getViewportLayout?.();
 
         // Keep nodes fully inside visible play area (avoid top/bottom cuts).
@@ -853,6 +859,7 @@ export default class InteractionSystem {
     spawnEnvironmentDecoration(groundY) {
         // Decorative sidewalk hazards were merged into the background (no longer spawned).
         // Pool for procedural road colliders; stream starts only after the doll rolls (maintainHazardStream).
+        // We MUST initialize this pool even in authoritative rounds because we need it for the fatal loss obstacle.
         this.nextHazardSpawnX = 1e9;
 
         if (!this.decorationHazards.length) {
@@ -1166,19 +1173,33 @@ export default class InteractionSystem {
         this.volatilityTuning = GAME_CONFIG.volatilityModes?.[volatility] || GAME_CONFIG.volatilityModes?.NORMAL || {};
     }
 
-    setAuthoritativeRoundControl({ enabled = false, targetMultiplier = 1, forceLoss = false, durationMs = 0 } = {}) {
-        this.authoritativeRound.enabled = !!enabled;
-        this.authoritativeRound.targetMultiplier = this.clampMultiplier(Math.max(1, Number(targetMultiplier) || 1));
-        this.authoritativeRound.forceLoss = !!forceLoss;
-        this.authoritativeRound.durationMs = Math.max(0, Number(durationMs) || 0);
-        this.authoritativeRound.elapsedMs = 0;
-        this.authoritativeRound.progress = 0;
-        if (this.authoritativeRound.enabled) {
-            // Start authoritative path from x1.00 each round.
-            this.multiplier = 1;
-            this.emitMultiplierChanged();
-            this.dollController.updateScoreValue?.(this.multiplier);
+    setAuthoritativeRoundControl(plan = null) {
+        if (!plan || !plan.useSeededAuthoritativePlanner) {
+            this.authoritativeRound.enabled = false;
+            this.currentPlannedStepIndex = 0;
+            return;
         }
+
+        this.authoritativeRound = {
+            ...this.authoritativeRound,
+            ...plan,
+            enabled: true,
+            forceLoss: !!plan.isLoss,
+            elapsedMs: 0,
+            progress: 0
+        };
+        
+        this.currentPlannedStepIndex = 0;
+        this.plannedItemsSpawned = 0;
+        this.fatalLossObstacleSpawned = false;
+        this.multiplier = 1;
+        this.emitMultiplierChanged();
+        this.dollController.updateScoreValue?.(this.multiplier);
+
+        // Reset deterministic path state so first segment is recomputed from launch position.
+        this.authoritativePath = { active: false, segIndex: -1, completed: false };
+
+        this.generatePlannedAuthoritativeItems(plan);
     }
 
     setAuthoritativeTimelineProgress(elapsedMs = 0, durationMs = 0) {
@@ -1187,6 +1208,880 @@ export default class InteractionSystem {
         const dur = Math.max(1, Number(durationMs || this.authoritativeRound.durationMs) || 1);
         this.authoritativeRound.durationMs = dur;
         this.authoritativeRound.progress = Phaser.Math.Clamp(this.authoritativeRound.elapsedMs / dur, 0, 1);
+    }
+
+    getAuthoritativeImpulse(type) {
+        // --- ABSOLUTE UNIFIED VELOCITY LOCK ---
+        // Every hit now results in a fixed, consistent speed in all directions.
+        // Forward is always 850. Up is always -420. Down is always 450.
+        switch(type) {
+            case "multiply": 
+            case "add":      return { x: 720, y: -280 }; // Gentle UP
+            case "subtract": 
+            case "divide":   return { x: 720, y: 300 };  // Gentle DOWN
+            case "bat":      return { x: 0, y: 650 };  // STRAIGHT DOWN SLAM
+            default:         return { x: 720, y: -250 };
+        }
+    }
+
+    clearAllAuthoritativeItems() {
+        // Destroy and flush all current items from memory
+        // BUT preserve decorationHazards pool items — they are reused for fatal loss obstacles.
+        const preservedHazards = [];
+        this.allItems.forEach(item => {
+            if (item.isProceduralRoadPool) {
+                // Keep this item alive — it belongs to the decorationHazards pool
+                item.active = false;
+                item.hasCollided = false;
+                item.shape?.setVisible?.(false);
+                item.text?.setVisible?.(false);
+                preservedHazards.push(item);
+                return;
+            }
+            item.active = false;
+            if (item.shape) { try { item.shape.destroy(); } catch(e) {} }
+            if (item.text) { try { item.text.destroy(); } catch(e) {} }
+            if (item.sprite) { try { item.sprite.destroy(); } catch(e) {} }
+        });
+
+        // Reset main tracking arrays
+        this.allItems = [...preservedHazards];
+        this.pickups = [];
+        this.skyMultipliers = [];
+        this.bombs = [];
+        this.hazards = [...preservedHazards];
+        this.bats = [];
+        this.currentPlannedStepIndex = 0;
+    }
+
+    generatePlannedAuthoritativeItems(plan) {
+        if (!plan?.steps?.length) return;
+
+        // CRITICAL: Clear previous round items to prevent path pollution
+        this.clearAllAuthoritativeItems();
+
+        // Reset zig-zag tracker so the first decision per round is unbiased.
+        this._lastZigZagDir = 0;
+        this._lastZigZagBand = null;
+
+        const groundY = this.getGroundY();
+        const startX = (GAME_CONFIG.doll.startX || 180);
+        const startY = groundY - (GAME_CONFIG.doll.startYOffsetFromGround || 120);
+        
+        // 1. PHYSICS SIMULATION INITIAL STATE (Sync with Rail Engine cruise speed)
+        let simX = startX;
+        let simY = startY;
+        
+        // Dynamically fetch screen layout so we never spawn items off-screen on mobile
+        const layout = this.scene.getViewportLayout?.();
+        const stageTopY = layout?.stageTop ?? 0;
+        
+        const isMobile = !this.scene.sys.game.device.os.desktop;
+        
+        // PC screens are often much taller/wider and can handle massive upward arcs.
+        // Mobile screens are narrow/short, so we restrict how high the planned arc can go 
+        // to prevent it from constantly sliding against the ceiling.
+        const maxUpwardSpread = isMobile ? 600 : 1000;
+        
+        // Start simulation at the intended cruise speed for 100% parity from frame 1
+        let simVX = 720; 
+        let simVY = -580; // Standardize launch Y for perfect sync
+        
+        let simAirBoostTimerMs = 680; // Start with boost to match launch arc   
+        const tuning = this.dollController.speedTuning || {};
+        const gravityMultiplier = tuning.gravityMultiplier ?? 1;
+        const gravity = (GAME_CONFIG.doll.gravity || 850) * gravityMultiplier;
+        
+        // Mix in a time-based salt so path layout differs every round even when
+        // roundId / crashPoint / seed are repeated (e.g. during testing).
+        // The step SEQUENCE (multiplier values) is server-determined via plan.steps;
+        // only the VISUAL path positions use this combined seed.
+        const timeSalt = Math.floor(performance.now()) & 0xFFFFFF;
+        let state = (((plan.seed || 12345) ^ timeSalt) * 1664525 + 1013904223) % 2147483647;
+        if (state <= 0) state += 2147483646;
+        const rng = () => {
+            state = (state * 48271) % 2147483647;
+            return (state - 1) / 2147483646;
+        };
+
+        const totalDurationSec = (plan.durationMs / 1000) * 0.92; 
+        
+        // Use a fixed physics step for perfect parity with reality
+        const dt = 1 / 60;
+        const totalSimSteps = Math.floor(totalDurationSec / dt);
+        
+        // Ensure first few items are closer together to guarantee engagement
+        const baseStepsPerSegment = Math.floor(totalSimSteps / Math.max(1, plan.steps.length));
+
+        plan.steps.forEach((step, index) => {
+            // Randomize steps per segment: 60% to 140% of base, but capped for safety
+            let segmentVariation = (rng() * 0.8) + 0.6; // 0.6 to 1.4
+            let stepsPerSegment = Math.floor(baseStepsPerSegment * segmentVariation);
+            
+            // EMERGENCY: If previous hit was a bomb (divide), pull the next multiplier VERY close
+            if (index > 0 && plan.steps[index-1].type === "divide") {
+                stepsPerSegment = Math.min(stepsPerSegment, 28); // 0.46s max gap after bomb
+            }
+
+            // First 2 segments should be tighter (max 0.7s) to avoid early grounding
+            if (index < 2) stepsPerSegment = Math.min(stepsPerSegment, 42); 
+            // Max limit to avoid huge gaps
+            stepsPerSegment = Math.min(stepsPerSegment, 120); 
+            // MINIMUM limit: since we now use pure physics arcs without artificial horizontal 
+            // pushing, we must ensure enough time passes so items don't overlap horizontally.
+            stepsPerSegment = Math.max(stepsPerSegment, 26);
+
+            // Cap on how high items can go (and therefore how high doll can fly).
+            // Dynamic check ensures it never goes off-screen even on narrow mobile layouts.
+            const itemCeilingY = Math.max(groundY - maxUpwardSpread, stageTopY + 50);
+
+            // 2. SIMULATE Segment Physics (Fixed Resolution)
+            const AUTH_GRAVITY = 620; // Unified floaty gravity for all Auth calculations
+            for (let i = 0; i < stepsPerSegment; i++) {
+                // FIXED CONSTANTS: Must match DollController exactly
+                const gravity = AUTH_GRAVITY; 
+                const airBoostGravityScale = simAirBoostTimerMs > 0 ? 0.28 : 1;
+                simAirBoostTimerMs = Math.max(0, simAirBoostTimerMs - (dt * 1000));
+                
+                simVY += gravity * airBoostGravityScale * dt;
+                if (simAirBoostTimerMs > 0 && simVY > 80) {
+                    simVY *= Math.pow(0.81, dt * 60); // 0.81 damping for smooth glide
+                }
+                simX += simVX * dt;
+                simY += simVY * dt;
+                if (simY < itemCeilingY) simY = itemCeilingY; // hard ceiling
+
+                // GROUND SAFETY: Force multipliers to stay well above the ground (Fixed Minimum Height)
+                // Exception: final step goes LOW near ground
+                const isSlam = !!step.isFinalStep;
+                const hazardSafety = isSlam ? 140 : (step.type === "bat" || step.type === "divide") ? 400 : 200;
+                const safetyHeight = (groundY - 10) - hazardSafety; 
+                
+                // MINIMUM SPACING: Ensure items are spaced horizontally and never on the ground
+                if (i > 15 && simVY > 0 && simY > safetyHeight) {
+                    break; 
+                }
+            }
+
+            // --- FLUSH BASELINE ---
+            // Reset swept collision anchors to current start position to avoid "ghost paths"
+            // from previous round's end coordinates.
+            this.prevDollX = simX;
+            this.prevDollY = simY;
+
+            // FORCED HEIGHT: Ensure items are NEVER on the ground or too high in sky.
+            // Exception: final step goes LOW near ground for a natural dive.
+            const isFinalStep = !!step.isFinalStep;
+            const finalHazardSafety = isFinalStep ? 140 : (step.type === "bat" || step.type === "divide") ? 360 : 220;
+            const finalSafetyHeight = (groundY - 10) - finalHazardSafety;
+            const finalCeilingY = Math.max(groundY - maxUpwardSpread, stageTopY + 50);
+
+            let x = simX;
+            let spawnY = Math.min(simY, finalSafetyHeight);
+            spawnY = Math.max(spawnY, finalCeilingY);
+
+            // --- ENFORCE MIN GAP BETWEEN CONSECUTIVE PLANNED ITEMS ---
+            // Avoid weird movement and visual overlap of multipliers/bats/bombs.
+            const prevPlanned = this.allItems[this.allItems.length - 1];
+            if (!prevPlanned) {
+                // First item is placed purely based on the physics simulation of the launch arc.
+                // No artificial offsets, so the natural kick hits it perfectly.
+                spawnY = Math.min(spawnY, finalSafetyHeight);
+            } else {
+                // SAME ROW PREVENTION
+                // The user explicitly requested that no two consecutive multipliers spawn in the same row.
+                // If the physics simulation accidentally places them too close vertically, we force a gap.
+                const prevY = prevPlanned.y || 0;
+                if (Math.abs(spawnY - prevY) < 200) {
+                    // Push it further along its current vertical direction
+                    if (simVY > 0) {
+                        spawnY += 180; // Doll is falling, push the item lower
+                    } else {
+                        spawnY -= 180; // Doll is rising, push the item higher
+                    }
+                }
+                
+                // Natural jitter to prevent mathematical stiffness.
+                spawnY += -10 + Math.floor(rng() * 20);
+                spawnY = Math.max(finalCeilingY, Math.min(spawnY, finalSafetyHeight));
+            }
+
+            const y = spawnY;
+
+            // Sync simulation Y for next segment to maintain elevation
+            simY = spawnY;
+            
+            const yOffset = y - groundY;
+
+            let item;
+            if (step.type === "bat") {
+                item = this.createBatObject(x, y, yOffset, { label: step.label, id: `planned_${index}` });
+            } else if (step.type === "divide") {
+                item = this.createCircleObject(x, y, 20, 0xef4444, step.label, "bomb", yOffset);
+            } else if (step.type === "multiply" || step.type === "subtract") {
+                item = this.createSkyMultiplierObject(x, y, { label: step.label, id: `planned_${index}` }, yOffset);
+            } else {
+                item = this.createCircleObject(x, y, 22, 0x22c55e, step.label, "pickup", yOffset);
+            }
+
+            item.isPlannedAuthoritativeItem = true;
+            item.plannedStepIndex = step.stepIndex;
+            item.effect = { type: step.type, value: step.value };
+            item.expectedHit = true;
+            
+            this.allItems.push(item);
+            
+            // Categorize for correct collision detection and animation loops
+            if (step.type === "bat") {
+                this.bats.push(item);
+            } else if (step.type === "divide") {
+                this.bombs.push(item);
+            } else if (step.type === "multiply" || step.type === "subtract") {
+                this.skyMultipliers.push(item);
+            } else {
+                this.pickups.push(item);
+            }
+
+            // 4. SYNCED IMPULSE & GLIDE RESET (Mirroring Rail Engine exactly)
+            const isMinus = (step.type === "subtract" || step.type === "divide");
+            
+            if (isFinalStep) {
+                // THE PENGU SPORT FINISH:
+                // Regardless of whether the final step is a green add or a red minus, 
+                // it acts as the final "anchor" that slams the doll down into the ground!
+                simVY = 580; // Heavy downward slam
+                simVX = 350; // Slow down horizontal momentum for a tight drop
+                simAirBoostTimerMs = 0;
+            } else if (isMinus || step.type === "bat") {
+                // Fixed drops/slams for negative items
+                const impulse = this.getAuthoritativeImpulse(step.type);
+                simVX = impulse.x; 
+                simVY = impulse.y;
+                simAirBoostTimerMs = 0;
+            } else {
+                // VARY THE UPWARD BUMP to create a dynamic, zig-zag path (up, mid, low)
+                const r = rng();
+                if (r > 0.70) {
+                    // Massive upward shot (TOP ROW) - 30% chance
+                    simVY = -850 - (rng() * 400); // -850 to -1250
+                    simVX = 750 + (rng() * 100);
+                } else if (r > 0.30) {
+                    // Standard mid-high bounce
+                    simVY = -450 - (rng() * 300); // -450 to -750
+                    simVX = 650 + (rng() * 100);
+                } else {
+                    // Shallow low bump
+                    simVY = -250 - (rng() * 150); // -250 to -400
+                    simVX = 600 + (rng() * 100);
+                }
+                
+                // If the doll is already very high, force a shallower bounce to bring it down.
+                if (simY < finalSafetyHeight - 450 && rng() > 0.25) {
+                    simVY = -100 - (rng() * 150); 
+                }
+                
+                simAirBoostTimerMs = (simVY < -350) ? 750 : 0;
+            }
+
+            // Store the predicted velocity for re-syncing during actual collision
+            // The real game loop will use these EXACT randomized values instead of the fixed fallback!
+            item.targetVX = simVX;
+            item.targetVY = simVY;
+            item.targetAirBoostTimerMs = simAirBoostTimerMs;
+        });
+
+        if (GAME_CONFIG.debug?.enableLogs) {
+            console.log(`[InteractionSystem] Type-based simulation complete for round ${plan.roundId}`);
+        }
+
+        // Populate the world with decorative sky multipliers for visual richness.
+        // These are non-collidable in authoritative mode (collision pool only allows next planned item).
+        this.populateAuthoritativeSkyDecorations(plan);
+    }
+
+    populateAuthoritativeSkyDecorations(plan) {
+        if (!plan?.steps?.length) return;
+
+        const groundY = this.getGroundY();
+        const layout = this.scene.getViewportLayout?.();
+        const stageTop = layout?.stageTop ?? 0;
+
+        const isMobile = !this.scene.sys.game.device.os.desktop;
+        const maxUpwardSpread = isMobile ? 600 : 1000;
+
+        // Visual band where decorations live.
+        // We must allow decorations to spawn all the way up to the highest possible arc!
+        const safeTopY = Math.min(stageTop + 50, groundY - maxUpwardSpread - 150);
+        const safeBottomY = Math.max(stageTop + 220, groundY - 170);
+
+        const firstX = (GAME_CONFIG.doll.startX || 180);
+        const plannedItems = this.allItems.filter(it => it.isPlannedAuthoritativeItem && it.active);
+        const lastPlannedX = plannedItems.length
+            ? Math.max(...plannedItems.map(it => Number(it.x) || 0))
+            : firstX + 4000;
+        const startX = firstX - 200;
+        // Keep decorations going well past the last planned item so the doll's
+        // ground-roll afterward is never visually empty.
+        const endX = lastPlannedX + 4500;
+        const width = Math.max(2000, endX - startX);
+
+        // ~1 decoration per 220 px of world width.
+        // Because we significantly expanded the sky vertically, we must multiply the 
+        // base count by the new vertical area to maintain the same dense feeling!
+        const density = 1 / 220;
+        const heightMultiplier = Math.max(1, (safeBottomY - safeTopY) / 400); 
+        const targetCount = Math.max(28, Math.floor(width * density * heightMultiplier));
+
+        // Reserved zone around planned items: decorations never overlap planned multipliers.
+        const reservedRadius = 130;
+        const reserved = plannedItems.map(it => ({ x: Number(it.x) || 0, y: Number(it.y) || 0 }));
+
+        // Path segments between consecutive planned items — the doll's actual travel corridor.
+        // Decorations must NOT sit inside this corridor (only around it).
+        const sortedPlanned = plannedItems.slice().sort((a, b) => Number(a.plannedStepIndex || 0) - Number(b.plannedStepIndex || 0));
+        const pathSegments = [];
+
+        const startXPos = GAME_CONFIG.doll.startX || 180;
+        const startYPos = groundY - (GAME_CONFIG.doll.startYOffsetFromGround || 120);
+
+        // 1. Add the critical FIRST segment from launch to the first planned item.
+        if (sortedPlanned.length > 0) {
+            pathSegments.push({
+                ax: startXPos,
+                ay: startYPos,
+                bx: Number(sortedPlanned[0].x) || 0,
+                by: Number(sortedPlanned[0].y) || 0,
+                isLaunch: true,
+                lastType: null
+            });
+        }
+
+        // 2. Add all intermediate segments
+        for (let i = 0; i < sortedPlanned.length - 1; i++) {
+            pathSegments.push({
+                ax: Number(sortedPlanned[i].x) || 0,
+                ay: Number(sortedPlanned[i].y) || 0,
+                bx: Number(sortedPlanned[i + 1].x) || 0,
+                by: Number(sortedPlanned[i + 1].y) || 0,
+                isLaunch: false,
+                lastType: sortedPlanned[i]?.effect?.type || null
+            });
+        }
+        // TRUE BALLISTIC LANDING DESCENT
+        // Calculate the absolute exact physics path from the crash point to the ground.
+        const lastPlanned = sortedPlanned[sortedPlanned.length - 1];
+        if (lastPlanned) {
+            const startXPos = Number(lastPlanned.x) || 0;
+            const startYPos = Number(lastPlanned.y) || 0;
+            const vy0 = Number(lastPlanned.targetVY) || 0;
+            const vx0 = Number(lastPlanned.targetVX) || 720;
+            const gravity = 620; // Match AUTH_GRAVITY
+            
+            // Solve physics equation for time to hit ground: 0.5*g*t^2 + vy0*t - deltaY = 0
+            const deltaY = (groundY - 10) - startYPos;
+            const a = 0.5 * gravity;
+            const b = vy0;
+            const c = -deltaY;
+            const discriminant = (b * b) - (4 * a * c);
+            
+            if (discriminant >= 0) {
+                const t = (-b + Math.sqrt(discriminant)) / (2 * a);
+                const endXPos = startXPos + (vx0 * t);
+                
+                pathSegments.push({
+                    ax: startXPos,
+                    ay: startYPos,
+                    bx: endXPos,
+                    by: groundY - 10,
+                    isLanding: true,
+                    timeToGround: t,
+                    vx0,
+                    vy0,
+                    gravity
+                });
+            }
+        }
+        // Wide clearance: ensures a distinct "highway" for the doll 
+        // where decorative multipliers only flank the path.
+        const pathClearance = 160;
+
+        const dollCeilingY = stageTop + 30;
+
+        const arcDirectionFor = (lastType, fromY, toY) => {
+            if (lastType === "bat") return "drop";
+            if (Math.abs(toY - fromY) < 24) return "linear";
+            if (toY < fromY) return "rise";
+            return "fall";
+        };
+
+        // Approximate the doll's actual travel curve for each segment.
+        // We calculate samples so the clearance tunnel perfectly wraps around the true path.
+        const curveSamples = [];
+        const SAMPLES_PER_SEG = 24;
+        for (let i = 0; i < pathSegments.length; i++) {
+            const seg = pathSegments[i];
+
+            if (seg.isLanding) {
+                // Use the exact mathematical ballistic prediction
+                for (let s = 0; s <= SAMPLES_PER_SEG; s++) {
+                    const tRatio = s / SAMPLES_PER_SEG;
+                    const tSec = tRatio * seg.timeToGround;
+                    const cx = seg.ax + (seg.vx0 * tSec);
+                    let cy = seg.ay + (seg.vy0 * tSec) + (0.5 * seg.gravity * tSec * tSec);
+                    if (cy < dollCeilingY) cy = dollCeilingY;
+                    curveSamples.push({ x: cx, y: cy });
+                }
+                continue;
+            }
+
+            const dx = seg.bx - seg.ax;
+            const durSec = Math.max(0.001, Math.abs(dx) / 600);
+            
+            const prevItem = sortedPlanned[i];
+            const lastType = prevItem?.effect?.type || null;
+
+            if (isMobile) {
+                // MOBILE: Use original cubic tweens
+                const arcDir = seg.isLaunch 
+                    ? (seg.by < seg.ay ? "rise" : "fall") 
+                    : arcDirectionFor(seg.lastType, seg.ay, seg.by);
+                for (let s = 0; s <= SAMPLES_PER_SEG; s++) {
+                    const t = s / SAMPLES_PER_SEG;
+                    let tY;
+                    if (arcDir === "drop") tY = t * t;
+                    else if (arcDir === "fall") tY = t * t * t;
+                    else if (arcDir === "rise") {
+                        const inv = 1 - t;
+                        tY = 1 - (inv * inv * inv);
+                    } else tY = t;
+
+                    const cx = seg.ax + dx * t;
+                    let cy = seg.ay + (seg.by - seg.ay) * tY;
+                    
+                    if (cy < dollCeilingY) cy = dollCeilingY;
+                    curveSamples.push({ x: cx, y: cy });
+                }
+            } else {
+                // PC: Use pure physics kinematics
+                const gravity = 620; // Match AUTH_GRAVITY
+                const v_y0 = (seg.by - seg.ay - 0.5 * gravity * durSec * durSec) / durSec;
+
+                for (let s = 0; s <= SAMPLES_PER_SEG; s++) {
+                    const t = s / SAMPLES_PER_SEG;
+                    const tSec = t * durSec;
+                    
+                    const cx = seg.ax + dx * t;
+                    let cy = seg.ay + (v_y0 * tSec) + (0.5 * gravity * tSec * tSec);
+                    
+                    if (cy < dollCeilingY) cy = dollCeilingY;
+                    curveSamples.push({ x: cx, y: cy });
+                }
+            }
+        }
+
+        const pointToSegmentDist = (px, py, ax, ay, bx, by) => {
+            const dx = bx - ax;
+            const dy = by - ay;
+            const len2 = (dx * dx) + (dy * dy);
+            if (len2 === 0) return Math.hypot(px - ax, py - ay);
+            let tt = ((px - ax) * dx + (py - ay) * dy) / len2;
+            if (tt < 0) tt = 0;
+            else if (tt > 1) tt = 1;
+            const cx = ax + tt * dx;
+            const cy = ay + tt * dy;
+            return Math.hypot(px - cx, py - cy);
+        };
+
+        const isInsidePath = (px, py) => {
+            // All segments (including the landing descent) use the same curve-sample clearance.
+            // No special-case rectangle — the physics simulation provides the exact doll trajectory.
+            for (let i = 0; i < curveSamples.length; i++) {
+                const sample = curveSamples[i];
+                const dx = px - sample.x;
+                const dy = py - sample.y;
+                
+                // Provide an extra-large tunnel for the very beginning of the launch (x < 600)
+                const currentClearance = sample.x < 600 ? 220 : pathClearance;
+                if ((dx * dx + dy * dy) < (currentClearance * currentClearance)) return true;
+            }
+            return false;
+        };
+
+
+        // Decorative labels reuse the planned step labels (same flavor as path),
+        // limited to sky-multiplier types so bombs/bats aren't decoratively shown.
+        const allowedTypes = new Set(["add", "multiply", "subtract"]);
+        let labelPool = plan.steps
+            .filter(s => allowedTypes.has(String(s?.type)))
+            .map(s => String(s?.label || "").trim())
+            .filter(Boolean);
+        if (!labelPool.length) {
+            labelPool = ["+1.00", "-1.00", "x2.00"];
+        }
+
+        // Mix time-salt so decoration layout differs every round (same as path RNG logic).
+        const decorTimeSalt = Math.floor(performance.now() * 1.7) & 0xFFFFFF;
+        let state = (((plan.seed || 12345) ^ decorTimeSalt) * 22695477 + 1) % 2147483647;
+        if (state <= 0) state += 2147483646;
+        const rng = () => {
+            state = (state * 48271) % 2147483647;
+            return (state - 1) / 2147483646;
+        };
+
+        const decorPositions = [];
+        // Allow tight clusters near the path (no "wall of multipliers" but no big gaps either).
+        const minDecorSpacing = 110;
+        let placed = 0;
+        let attempts = 0;
+        const maxAttempts = targetCount * 12;
+
+        // === Pass 1: Rim decorations along both sides of every path segment ===
+        // Guarantees the path is always visibly flanked by multipliers at tight gaps,
+        // so it doesn't look like the doll is travelling on a separate isolated path.
+        const tryPlaceRim = (rx, ry) => {
+            if (rx < startX || rx > endX) return false;
+            if (ry < safeTopY || ry > safeBottomY) return false;
+            for (let i = 0; i < reserved.length; i++) {
+                const dx = rx - reserved[i].x;
+                const dy = ry - reserved[i].y;
+                if ((dx * dx + dy * dy) < (reservedRadius * reservedRadius)) return false;
+            }
+            // Reject if inside the doll's real travel curve (not just the straight line).
+            if (isInsidePath(rx, ry)) return false;
+            for (let i = 0; i < decorPositions.length; i++) {
+                const dx = rx - decorPositions[i].x;
+                const dy = ry - decorPositions[i].y;
+                if ((dx * dx + dy * dy) < (minDecorSpacing * minDecorSpacing)) return false;
+            }
+            const label = labelPool[Math.floor(rng() * labelPool.length)];
+            const yOffset = ry - groundY;
+            const item = this.createSkyMultiplierObject(rx, ry, { label, id: `decor_rim_${placed}` }, yOffset);
+            item.isProceduralDecoration = true;
+            item.isPlannedAuthoritativeItem = false;
+            item.expectedHit = false;
+            item.active = true;
+            this.allItems.push(item);
+            this.skyMultipliers.push(item);
+            decorPositions.push({ x: rx, y: ry });
+            placed++;
+            return true;
+        };
+
+        for (let s = 0; s < pathSegments.length; s++) {
+            const seg = pathSegments[s];
+            const sdx = seg.bx - seg.ax;
+            const sdy = seg.by - seg.ay;
+            const segLen = Math.max(1, Math.hypot(sdx, sdy));
+            const px = -sdy / segLen; // perpendicular unit vector
+            const py = sdx / segLen;
+
+            // Number of rim placements on each side, scaled to segment length.
+            const perSide = Math.max(2, Math.round(segLen / 220));
+            for (let side = -1; side <= 1; side += 2) {
+                for (let k = 0; k < perSide; k++) {
+                    // t skips the very ends so rim items don't sit on top of planned items.
+                    const t = (k + 0.65) / (perSide + 0.3);
+                    const baseX = seg.ax + sdx * t;
+                    const baseY = seg.ay + sdy * t;
+                    // Try a few offset distances; first one that clears the curve wins.
+                    // This guarantees decorations end up just outside the doll's arc.
+                    const tryOffsets = [120, 150, 180, 220, 260];
+                    for (let oi = 0; oi < tryOffsets.length; oi++) {
+                        const offset = tryOffsets[oi] + (rng() * 30);
+                        const rx = baseX + px * offset * side;
+                        const ry = baseY + py * offset * side;
+                        if (tryPlaceRim(rx, ry)) break;
+                    }
+                }
+            }
+        }
+        // === End Pass 1 ===
+        while (placed < targetCount && attempts < maxAttempts) {
+            attempts++;
+            const x = startX + rng() * width;
+            const y = safeTopY + rng() * (safeBottomY - safeTopY);
+
+            // Skip if too close to a planned item.
+            let collides = false;
+            for (let i = 0; i < reserved.length; i++) {
+                const dx = x - reserved[i].x;
+                const dy = y - reserved[i].y;
+                if ((dx * dx + dy * dy) < (reservedRadius * reservedRadius)) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (collides) continue;
+
+            // Skip if inside the doll's actual travel curve (not just the straight line).
+            if (isInsidePath(x, y)) continue;
+
+            // Avoid bunching up decorations.
+            for (let i = 0; i < decorPositions.length; i++) {
+                const dx = x - decorPositions[i].x;
+                const dy = y - decorPositions[i].y;
+                if ((dx * dx + dy * dy) < (minDecorSpacing * minDecorSpacing)) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (collides) continue;
+
+            const label = labelPool[Math.floor(rng() * labelPool.length)];
+            const yOffset = y - groundY;
+            const item = this.createSkyMultiplierObject(x, y, { label, id: `decor_${placed}` }, yOffset);
+            // Mark as decoration: never enters collision pool, never recycled.
+            item.isProceduralDecoration = true;
+            item.isPlannedAuthoritativeItem = false;
+            item.expectedHit = false;
+            item.active = true;
+
+            this.allItems.push(item);
+            this.skyMultipliers.push(item);
+            decorPositions.push({ x, y });
+            placed++;
+        }
+
+        // === Pass 3: Trailing-area fill (after last planned item) ===
+        // The doll lands and rolls forward past the last planned item. We must fill
+        // that trailing region with multipliers so the player keeps seeing them
+        // around the doll's fall — only the actual fall column has a clean gap.
+        // This runs OUTSIDE the main targetCount budget to guarantee coverage even
+        // if the rim+scatter passes used up all slots.
+        let trailPlaced = 0;
+        if (lastPlanned) {
+            const trailStart = lastPlannedX + 220;
+            const trailEnd = endX;
+            const trailWidth = Math.max(0, trailEnd - trailStart);
+            if (trailWidth > 200) {
+                const trailTarget = Math.max(18, Math.floor(trailWidth / 200));
+                let trailAttempts = 0;
+                const trailMaxAttempts = trailTarget * 22;
+                while (trailPlaced < trailTarget && trailAttempts < trailMaxAttempts) {
+                    trailAttempts++;
+                    const x = trailStart + rng() * trailWidth;
+                    const y = safeTopY + rng() * (safeBottomY - safeTopY);
+
+                    let bad = false;
+                    for (let i = 0; i < reserved.length; i++) {
+                        const dx = x - reserved[i].x;
+                        const dy = y - reserved[i].y;
+                        if ((dx * dx + dy * dy) < (reservedRadius * reservedRadius)) { bad = true; break; }
+                    }
+                    if (bad) continue;
+
+                    if (isInsidePath(x, y)) continue;
+
+                    for (let i = 0; i < decorPositions.length; i++) {
+                        const dx = x - decorPositions[i].x;
+                        const dy = y - decorPositions[i].y;
+                        if ((dx * dx + dy * dy) < (minDecorSpacing * minDecorSpacing)) { bad = true; break; }
+                    }
+                    if (bad) continue;
+
+                    const label = labelPool[Math.floor(rng() * labelPool.length)];
+                    const yOffset = y - groundY;
+                    const item = this.createSkyMultiplierObject(x, y, { label, id: `decor_trail_${trailPlaced}` }, yOffset);
+                    item.isProceduralDecoration = true;
+                    item.isPlannedAuthoritativeItem = false;
+                    item.expectedHit = false;
+                    item.active = true;
+                    this.allItems.push(item);
+                    this.skyMultipliers.push(item);
+                    decorPositions.push({ x, y });
+                    trailPlaced++;
+                    placed++;
+                }
+            }
+        }
+
+        if (GAME_CONFIG.debug?.enableLogs) {
+            console.log(`[InteractionSystem] Decorations placed: ${placed} (target ${targetCount}, trailing ${trailPlaced}, off-path)`);
+        }
+    }
+
+    getNextPlannedItem() {
+        if (!this.authoritativeRound.enabled) return null;
+        
+        // Search pickups, skyMultipliers, and bombs for the next sequence item
+        const idx = this.currentPlannedStepIndex;
+        
+        // Small helper to check if item is the next target
+        const isNext = (item) => item.active && item.isPlannedAuthoritativeItem && item.plannedStepIndex === idx;
+
+        let target = this.pickups.find(isNext);
+        if (!target) target = this.skyMultipliers.find(isNext);
+        if (!target) target = this.bombs.find(isNext);
+        if (!target) target = this.bats.find(isNext);
+        
+        return target;
+    }
+
+    // Restrict collision pools in authoritative mode so doll only collides with the next planned item.
+    getAuthoritativeCollisionPool(defaultItems = [], acceptedTypes = []) {
+        if (!this.authoritativeRound?.enabled) return defaultItems;
+        const next = this.getNextPlannedItem();
+        if (!next?.active) return [];
+        const allowed = Array.isArray(acceptedTypes) ? acceptedTypes : [];
+        return allowed.includes(next.type) ? [next] : [];
+    }
+
+    // Begin a deterministic segment from doll's current position to next planned item.
+    beginAuthoritativePathSegment() {
+        const dc = this.dollController;
+        const next = this.getNextPlannedItem();
+        if (!dc?.position || !next) {
+            this.authoritativePath = this.authoritativePath || {};
+            this.authoritativePath.active = false;
+            this.authoritativePath.completed = !next;
+            return;
+        }
+        const fromX = Number(dc.position.x || 0);
+        const fromY = Number(dc.position.y || 0);
+        const toX = Number(next.x || 0);
+        const toY = Number(next.y || 0);
+        const dist = Math.hypot(toX - fromX, toY - fromY);
+        // Per-segment speed jitter so each round/segment feels different.
+        const speedPxPerSec = Phaser.Math.Between(620, 800);
+        // Slightly higher floor so consecutive items always feel spaced (no jerky teleport-like motion).
+        let durationMs = Phaser.Math.Clamp((dist / speedPxPerSec) * 1000, 340, 1600);
+        // Apply selected speed mode (SLOW / NORMAL / FAST / ULTRA) to the segment's
+        // wall-clock travel time. Visuals scale uniformly without affecting the
+        // authoritative outcome (still ends at exact crashPoint / winAmount).
+        const tsScale = Math.max(0.5, Math.min(2.0, Number(this.scene?.gameplayTimeScale) || 1));
+        if (tsScale !== 1) durationMs = durationMs / tsScale;
+
+        // Arc shape varies based on what was just consumed:
+        // - After `+` or `x`  → tall upward arc (celebratory leap to next item).
+        // - After `bat`       → straight-down dive then catch up (mirrors original gameflow).
+        // - After `-` or `÷`  → shallow arc (doll feels weighed down briefly).
+        // - First segment     → medium arc.
+        const planSteps = Array.isArray(this.authoritativeRound?.steps)
+            ? this.authoritativeRound.steps
+            : null;
+        const idx = Number(this.currentPlannedStepIndex || 0);
+        const lastStep = (planSteps && idx > 0) ? planSteps[idx - 1] : null;
+        const lastType = lastStep?.type || null;
+
+        // arcShape — strictly MONOTONIC in Y; the doll never reverses mid-segment
+        // (no "magnet pull"). Shape is chosen by ACTUAL segment direction so it
+        // always feels right even if items had to be clamped to the play band.
+        //   "drop" → strong gravity ease-in (after bat: deep fast plunge).
+        //   "rise" → ease-out: lift-off fast, soft arrival on a HIGHER target.
+        //   "fall" → ease-in:  glide-out slow, accelerate onto a LOWER target.
+        //   "linear" → flat segment (rare).
+        let arcShape;
+        let arcMagnitude = 0;
+        if (lastType === "bat") {
+            arcShape = "drop";
+            arcMagnitude = Phaser.Math.Between(160, 240);
+        } else if (Math.abs(toY - fromY) < 24) {
+            arcShape = "linear";
+        } else if (toY < fromY) {
+            arcShape = "rise";
+        } else {
+            arcShape = "fall";
+        }
+
+        this.authoritativePath = {
+            active: true,
+            segIndex: Number(next.plannedStepIndex ?? -1),
+            fromX,
+            fromY,
+            toX,
+            toY,
+            startAtMs: performance.now(),
+            durationMs,
+            arcMagnitude,
+            arcShape,
+            arcReason: lastType,
+            completed: false
+        };
+    }
+
+    // Override doll position/velocity along an exact segment to the next planned item.
+    // Guarantees 100% directional travel from one multiplier to the next.
+    updateAuthoritativePathOverride() {
+        if (!this.authoritativeRound?.enabled) return;
+        if (this.authoritativeRound?.crashLocked) return;
+        const dc = this.dollController;
+        if (!dc?.position) return;
+
+        // Skip override during launch grace so the kicker animation reads naturally.
+        const grace = Number(dc.launchGraceRemainingMs) || 0;
+        if (grace > 0) return;
+
+        const next = this.getNextPlannedItem();
+        if (!next) {
+            // No more planned items left — let physics handle final descent/landing.
+            if (this.authoritativePath) this.authoritativePath.active = false;
+            return;
+        }
+
+        // Re-init segment when next-target index changes.
+        const segIdx = Number(next.plannedStepIndex ?? -1);
+        if (!this.authoritativePath?.active || this.authoritativePath.segIndex !== segIdx) {
+            this.beginAuthoritativePathSegment();
+        }
+        const path = this.authoritativePath;
+        if (!path?.active) return;
+
+        const now = performance.now();
+        const t = Phaser.Math.Clamp((now - path.startAtMs) / Math.max(1, path.durationMs), 0, 1);
+        const arcMagnitude = Math.max(20, Number(path.arcMagnitude) || 38);
+
+        const isMobile = !this.scene.sys.game.device.os.desktop;
+
+        let newX, newY;
+        const durSec = Math.max(0.001, path.durationMs / 1000);
+
+        if (isMobile) {
+            // ORIGINAL CUBIC TWEEN LOGIC (Mobile Only)
+            const lin = (a, b) => a + (b - a) * t;
+            let tY;
+            if (path.arcShape === "drop") tY = t * t;
+            else if (path.arcShape === "fall") tY = t * t * t;
+            else if (path.arcShape === "rise") {
+                const inv = 1 - t;
+                tY = 1 - (inv * inv * inv);
+            } else tY = t;
+
+            newX = lin(path.fromX, path.toX);
+            newY = path.fromY + (path.toY - path.fromY) * tY;
+
+            // Simple velocity estimation
+            dc.velocity.x = (path.toX - path.fromX) / durSec;
+            dc.velocity.y = (path.toY - path.fromY) / durSec;
+        } else {
+            // PURE PHYSICS KINEMATICS LOGIC (PC Only)
+            const tSec = t * durSec;
+            const gravity = 800; 
+            const v_y0 = (path.toY - path.fromY - 0.5 * gravity * durSec * durSec) / durSec;
+            
+            newX = path.fromX + (path.toX - path.fromX) * t;
+            newY = path.fromY + (v_y0 * tSec) + (0.5 * gravity * tSec * tSec);
+
+            // True derivative velocity
+            dc.velocity.x = (path.toX - path.fromX) / durSec;
+            dc.velocity.y = v_y0 + (gravity * tSec);
+        }
+
+        // Hard ceiling so the doll never flies completely off the visible play area.
+        const layout = this.scene.getViewportLayout?.();
+        const stageTopY = layout?.stageTop ?? 0;
+        const dollCeilingY = stageTopY + 30;
+        if (newY < dollCeilingY) newY = dollCeilingY;
+
+        dc.position.x = newX;
+        dc.position.y = newY;
+
+        // Snap to exact target near end of segment to guarantee swept collision registers.
+        if (t >= 0.995) {
+            dc.position.x = path.toX;
+            dc.position.y = path.toY;
+        }
+
+        dc.syncVisuals?.();
     }
 
     setAuthoritativeLiveMultiplier(value) {
@@ -1210,23 +2105,21 @@ export default class InteractionSystem {
 
         switch (type) {
             case "add":
+            case "bat": // Treat bat as addition for sequence calculation
                 next = prev + value;
                 break;
-
             case "subtract":
                 next = Math.max(1, prev - value);
                 break;
-
             case "multiply":
                 next = prev * Math.max(1, value);
                 break;
-
             case "divide":
                 next = prev / Math.max(1, value);
                 break;
         }
 
-        next = this.clampMultiplier(next);
+        next = Number(this.clampMultiplier(next).toFixed(2));
 
         if (Math.abs(next - prev) < 0.0001) return false;
 
@@ -1242,26 +2135,38 @@ export default class InteractionSystem {
             return;
         }
 
-        this.updateBatWingAnimations(deltaSeconds);
+        // Apply Global Time Scale (Fast Forward / Slow Motion)
+        const timeScale = this.dollController.speedTuning.timeScale || 1.0;
+        const scaledDelta = deltaSeconds * timeScale;
+
+        this.updateBatWingAnimations(scaledDelta);
+
+        // --- DETERMINISTIC AUTHORITATIVE PATH OVERRIDE ---
+        // Force doll to travel exactly along the segment from its previous position
+        // to the next planned multiplier/hazard. This makes path 100% accurate and
+        // guarantees collision with the next item.
+        this.updateAuthoritativePathOverride();
 
         const dollX = this.dollController.position.x;
         const dollY = this.dollController.position.y;
-        // CRITICAL: InteractionSystem only starts updating when state becomes FLYING.
-        // On the very first frame, prevDollX/Y are null, which would zero the sweep and can miss a bat hit.
-        // Back-project by current velocity to preserve a valid swept segment on that first frame.
+
         const vxNow = Number(this.dollController?.velocity?.x) || 0;
         const vyNow = Number(this.dollController?.velocity?.y) || 0;
-        const prevDollX = (this.prevDollX ?? (dollX - vxNow * deltaSeconds));
-        const prevDollY = (this.prevDollY ?? (dollY - vyNow * deltaSeconds));
+        const prevDollX = (this.prevDollX ?? (dollX - vxNow * scaledDelta));
+        const prevDollY = (this.prevDollY ?? (dollY - vyNow * scaledDelta));
         // Sky stream recycle TELEPORTS pooled nodes. If that runs before collision, the swept test
         // uses prev→current doll motion against NEW positions the player never saw (phantom -1 hits).
         // Maintain sky numbers only after this frame's collisions (see end of update + launch-grace early return).
-        this.maintainHazardStream(dollX);
-        this.maintainBombStream(dollX);
-        this.maintainBatStream(dollX);
-        this.updateComboTimer(deltaSeconds);
+        if (!this.authoritativeRound.enabled) {
+            this.maintainHazardStream(dollX);
+            this.maintainBombStream(dollX);
+            this.maintainBatStream(dollX);
+        }
+        this.updateComboTimer(scaledDelta);
 
-        const dollCircleRadius = this.getDollCircleRadius();
+        // Increase hit radius significantly for authoritative items to ensure 100% success
+        // CENTER COLLISION: Set radius to a small value (8px) to force precision hits while maintaining reliability
+        const dollCircleRadius = this.authoritativeRound.enabled ? 8 : (GAME_CONFIG.doll?.collisionRadius ?? 26);
 
         // Once the doll is on the ground, we don't allow any more "number" collisions
         // (prevents going back up from late sky hits while rolling on the road).
@@ -1276,9 +2181,10 @@ export default class InteractionSystem {
 
         // Resolve circle collisions using swept "best hit" to avoid wrong/missed hits
         // when multiple nodes are close together.
+        const pickupItems = this.getAuthoritativeCollisionPool(this.pickups, ["pickup"]);
         const pickupHit = (isOnGroundNow || !allowAirCollectibles)
             ? null
-            : this.findBestAirLaneCircleHit(this.pickups, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+            : this.findBestAirLaneCircleHit(pickupItems, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (pickupHit) {
             const item = pickupHit;
             this.debugAirHit("pickup", item, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
@@ -1316,7 +2222,21 @@ export default class InteractionSystem {
                     this.multiplier = this.clampMultiplier(this.multiplier + effect.value + comboBonus);
                 }
             } else {
-                this.applyAuthoritativeEffectStep(effect);
+                // Sequence-aware authoritative hit
+                const isCorrectPlannedStep = item.isPlannedAuthoritativeItem && item.plannedStepIndex === this.currentPlannedStepIndex;
+                if (isCorrectPlannedStep) {
+                    this.applyAuthoritativeEffectStep(effect);
+                    this.currentPlannedStepIndex++;
+                    if (GAME_CONFIG.debug?.enableLogs) {
+                        console.log(`[InteractionSystem] Planned hit index=${item.plannedStepIndex}, label=${item.text?.text}, newMultiplier=${this.multiplier}`);
+                    }
+                } else {
+                    // Ignore out-of-order planned items or random items in authoritative mode
+                    if (item.isPlannedAuthoritativeItem && GAME_CONFIG.debug?.enableLogs) {
+                         console.log(`[InteractionSystem] Ignored out-of-order planned hit: label=${item.text?.text}, itemStep=${item.plannedStepIndex}, currentStep=${this.currentPlannedStepIndex}`);
+                    }
+                    return; 
+                }
             }
 
             this.consumeObject(item);
@@ -1324,9 +2244,36 @@ export default class InteractionSystem {
             this.scene.audioManager?.play("sfx_pickup", { volume: 0.4 });
             // Keep small generic sparkle too (optional)
             this.spawnImpactParticles("pickup", item.x, item.y);
-            this.applyRandomCollisionImpulse("pickup");
+            if (this.authoritativeRound.enabled) {
+                // SYNC VELOCITY: 1:1 Parity with simulation to ensure zero path drift
+                if (item.targetVX !== undefined) {
+                    this.dollController.velocity.x = item.targetVX;
+                    this.dollController.velocity.y = item.targetVY;
+                    this.dollController.airBoostTimerMs = item.targetAirBoostTimerMs || 0;
+                    
+                    if (GAME_CONFIG.debug?.enableLogs) {
+                        console.log(`[InteractionSystem] Velocity Re-Synced at item ${item.plannedStepIndex}`);
+                    }
+                } else {
+                    // Fallback to impulse if target velocity is missing
+                    const imp = this.getAuthoritativeImpulse(effect.type);
+                    const isMinus = (effect.type === "subtract" || effect.type === "divide");
+                    this.dollController.applyImpulse(imp.x, imp.y, isMinus);
+                }
 
-            const labelVal = effect.type === "multiply" ? `x${effect.value}` : `+${effect.value}`;
+                // If minus hit, restore hazard impact feel
+                if (effect.type === "subtract") {
+                    this.scene.shakeOnHazard?.();
+                    this.dollController.setExpression("impact");
+                    this.dollController.lockExpressionFor(800);
+                }
+            } else {
+                this.applyRandomCollisionImpulse("pickup");
+            }
+
+            const labelVal = (this.authoritativeRound.enabled && item.isPlannedAuthoritativeItem) 
+                ? item.text?.text 
+                : (effect.type === "multiply" ? `x${effect.value}` : `+${effect.value}`);
             const floatingValue = (comboBonus > 0 && !this.authoritativeRound.enabled) ? `${labelVal} (+${comboBonus})` : labelVal;
             // Use Bubblegum colors: Blue for x multipliers, Green for + additions
             const floatColor = effect.type === "multiply" ? "#60a5fa" : "#4ade80";
@@ -1350,54 +2297,83 @@ export default class InteractionSystem {
                 // Keep baseline up to date and skip early hazard hits (prevents rare "kick fail" feeling).
                 this.prevDollX = dollX;
                 this.prevDollY = dollY;
-                this.maintainSkyMultiplierStream(dollX);
+                if (!this.authoritativeRound.enabled) {
+                    this.maintainSkyMultiplierStream(dollX);
+                }
                 return;
             }
-            this.checkCircleCollisionsSwept(this.bombs, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
-            const effect = item.effect || { type: "subtract", value: 1 };
-            this.resetCombo();
+            const bombItems = this.getAuthoritativeCollisionPool(this.bombs, ["bomb"]);
+            this.checkCircleCollisionsSwept(bombItems, prevDollX, prevDollY, dollX, dollY, dollCircleRadius, (item) => {
+                const effect = item.effect || { type: "divide", value: 2 };
+                this.resetCombo();
 
-            const prevMultiplier = this.multiplier;
+                const prevMultiplier = this.multiplier;
 
-            // Bombs: always ÷2 on hit
-            if (!this.authoritativeRound.enabled) {
-                if (effect.type === "divide" || effect.type === "subtract" || effect.type === "multiply") {
+                if (!this.authoritativeRound.enabled) {
                     const divisor = 2;
                     this.multiplier = this.clampMultiplier(this.multiplier / divisor);
                     this.showFloatingText(item.x, item.y - 26, `÷${Number(divisor.toFixed(2))}`, "#f87171");
                 } else {
-                    // Default: small penalty
-                    const divisor = 2;
-                    this.multiplier = this.clampMultiplier(this.multiplier / divisor);
-                    this.showFloatingText(item.x, item.y - 26, `÷${Number(divisor.toFixed(2))}`, "#f87171");
+                    const isCorrectPlannedStep = item.isPlannedAuthoritativeItem && item.plannedStepIndex === this.currentPlannedStepIndex;
+                    if (!isCorrectPlannedStep) {
+                        if (item.isPlannedAuthoritativeItem && GAME_CONFIG.debug?.enableLogs) {
+                            console.log(`[InteractionSystem] Ignored out-of-order planned bomb hit: label=${item.text?.text}, itemStep=${item.plannedStepIndex}, currentStep=${this.currentPlannedStepIndex}`);
+                        }
+                        return;
+                    }
+
+                    this.applyAuthoritativeEffectStep(effect);
+
+                    if (item.targetVX !== undefined) {
+                        this.dollController.velocity.x = item.targetVX;
+                        this.dollController.velocity.y = item.targetVY;
+                        this.dollController.airBoostTimerMs = item.targetAirBoostTimerMs || 0;
+                    } else {
+                        const imp = this.getAuthoritativeImpulse(effect.type);
+                        this.dollController.applyImpulse(imp.x, imp.y, true);
+                    }
+
+                    this.currentPlannedStepIndex++;
+
+                    this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
+                    this.scene.shakeOnHazard?.();
+                    this.spawnImpactParticles("bomb", item.x, item.y);
+                    this.dollController.setExpression("impact");
+                    this.dollController.lockExpressionFor(1000);
+                    this.dollController.setTrailTheme?.("minus", 0);
+
+                    if (GAME_CONFIG.debug?.enableLogs) {
+                        console.log(`[InteractionSystem] Planned bomb hit index=${item.plannedStepIndex}, label=${item.text?.text}, newMultiplier=${this.multiplier}`);
+                    }
+                    this.showFloatingText(item.x, item.y - 26, item.text?.text || "÷2", "#f87171");
                 }
-            } else {
-                this.applyAuthoritativeEffectStep({ type: "divide", value: 2 });
-                this.showFloatingText(item.x, item.y - 26, "÷2", "#f87171");
-            }
 
-            this.consumeObject(item);
-            this.popObject(item.shape, item.text, 0xef4444);
-            this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
-            // Explosion exactly at collision point
-            this.spawnImpactParticles("bomb", dollX, dollY);
-            this.applyRandomCollisionImpulse("hazard");
-            this.dollController.onGameplayInteraction?.("bomb");
-            this.dollController.setTrailTheme?.("minus", 0);
+                this.consumeObject(item);
+                this.popObject(item.shape, item.text, 0xef4444);
+                this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
+                this.spawnImpactParticles("bomb", dollX, dollY);
+                if (!this.authoritativeRound.enabled) {
+                    this.applyRandomCollisionImpulse("hazard");
+                }
+                this.dollController.onGameplayInteraction?.("bomb");
+                this.dollController.setTrailTheme?.("minus", 0);
 
-            if (this.multiplier !== prevMultiplier) {
-                this.emitMultiplierChanged();
-                this.dollController.updateScoreValue?.(this.multiplier);
-            }
+                if (this.multiplier !== prevMultiplier) {
+                    this.emitMultiplierChanged();
+                    this.dollController.updateScoreValue?.(this.multiplier);
+                }
             });
 
             // Bats: must NEVER miss (mobile low-FPS). Use segmented swept AABB with a forgiving circle-based extent.
             const skyCfg = GAME_CONFIG.skyMultipliers || {};
             const maxSeg = skyCfg.maxSweepSegmentPx ?? 46;
-            const batPad = 8;
+            const nextBatTarget = this.authoritativeRound.enabled ? this.getNextPlannedItem() : null;
+            const isNextBat = !!(nextBatTarget && nextBatTarget.type === "bat");
+            const batPad = this.authoritativeRound.enabled ? (isNextBat ? 22 : 5) : 8;
             const batHalf = Math.max(8, dollCircleRadius + batPad);
+            const batItems = this.getAuthoritativeCollisionPool(this.bats, ["bat"]);
             const batHit = this.findBestRectHitSweptSegmented(
-                this.bats,
+                batItems,
                 prevDollX,
                 prevDollY,
                 dollX,
@@ -1408,18 +2384,55 @@ export default class InteractionSystem {
                 maxSeg
             );
             if (batHit && !batHit.hasCollided) {
+                const prevMultiplier = this.multiplier;
+                const effect = batHit.effect || { type: "add", value: 1 };
+
+                if (this.authoritativeRound.enabled) {
+                    const isCorrectPlannedStep = batHit.isPlannedAuthoritativeItem && batHit.plannedStepIndex === this.currentPlannedStepIndex;
+                    if (isCorrectPlannedStep) {
+                        this.applyAuthoritativeEffectStep(effect);
+                        
+                        // SYNC VELOCITY: 1:1 Parity with simulation to ensure zero path drift
+                        if (batHit.targetVX !== undefined) {
+                            this.dollController.velocity.x = batHit.targetVX;
+                            this.dollController.velocity.y = batHit.targetVY;
+                            this.dollController.airBoostTimerMs = batHit.targetAirBoostTimerMs || 0;
+                        }
+                        
+                        this.currentPlannedStepIndex++;
+                        if (GAME_CONFIG.debug?.enableLogs) {
+                            console.log(`[InteractionSystem] Planned bat hit index=${batHit.plannedStepIndex}, newMultiplier=${this.multiplier}`);
+                        }
+                    } else {
+                        // Ignore out-of-order bats in authoritative mode
+                        return;
+                    }
+                } else {
+                    this.multiplier = this.clampMultiplier(this.multiplier + 1);
+                }
+
                 batHit.hasCollided = true;
                 this.resetCombo();
                 this.consumeObject(batHit);
                 this.popObject(batHit.shape, batHit.text, 0xa855f7);
-                // Stop any lingering win stinger before playing hit SFX.
+                
                 this.scene.audioManager?.stop?.("sfx_win");
-                this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
-                this.spawnImpactParticles("bat", dollX, dollY);
-                const dir = (this.dollController.velocity.x ?? 1) >= 0 ? 1 : -1;
-                this.dollController.forceDiveDown?.(dir);
-                this.dollController.onGameplayInteraction?.("bomb");
-                this.dollController.setTrailTheme?.("minus", 0);
+                this.scene.audioManager?.play("sfx_bat_hit", { volume: 0.6 });
+                this.spawnImpactParticles("bat", batHit.x, batHit.y);
+                this.dollController.onGameplayInteraction?.("bat");
+                // Original gameflow: bat hit always slams the doll DOWN with panic expression.
+                this.dollController.forceDiveDown?.(1);
+                this.scene.shakeOnHazard?.();
+
+                const labelVal = (this.authoritativeRound.enabled && batHit.isPlannedAuthoritativeItem) 
+                    ? batHit.text?.text 
+                    : `+1`;
+                this.showFloatingText(batHit.x, batHit.y - 26, labelVal, "#a855f7");
+
+                if (this.multiplier !== prevMultiplier) {
+                    this.emitMultiplierChanged();
+                    this.dollController.updateScoreValue?.(this.multiplier);
+                }
             }
         }
 
@@ -1459,10 +2472,13 @@ export default class InteractionSystem {
         const groundYForWinCleanup = this.getGroundY();
         const collisionThresholdForWinCleanup = groundYForWinCleanup - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const nearGroundForWinCleanup = dollY >= (collisionThresholdForWinCleanup - 26);
+        const isOnGroundNowForFatal = dollY >= (collisionThresholdForWinCleanup - 1);
+        
         const isAuthoritativeWinPostCrash =
             this.authoritativeRound.enabled
             && !this.authoritativeRound.forceLoss
             && this.multiplier >= (this.authoritativeRound.targetMultiplier - 0.01);
+            
         if (isAuthoritativeWinPostCrash && nearGroundForWinCleanup) {
             // Server decided WIN: after crashPoint, hide road obstacles only at landing phase.
             this.clearRoadHazardsForAuthoritativeWin(dollX);
@@ -1470,6 +2486,12 @@ export default class InteractionSystem {
                 roadHit.hasCollided = true;
                 this.consumeObject(roadHit);
             }
+        }
+
+        // --- DYNAMIC FATAL OBSTACLE FOR LOSS ROUNDS ---
+        if (this.authoritativeRound?.enabled && this.authoritativeRound.forceLoss && isOnGroundNowForFatal) {
+            const vxNow = Math.abs(this.dollController?.velocity?.x || 0);
+            this.triggerAuthoritativeLossObstacle(dollX, vxNow);
         }
 
         if (!isAuthoritativeWinPostCrash && roadHit && !roadHit.hasCollided) {
@@ -1543,9 +2565,10 @@ export default class InteractionSystem {
         let bestImpulse = null;
         let hasDrop = false;
 
+        const skyItems = this.getAuthoritativeCollisionPool(this.skyMultipliers, ["sky_multiplier"]);
         const skyHit = (isOnGroundNow || !allowAirCollectibles)
             ? null
-            : this.findBestAirLaneCircleHit(this.skyMultipliers, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
+            : this.findBestAirLaneCircleHit(skyItems, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
         if (skyHit) {
             const item = skyHit;
             this.debugAirHit("sky", item, prevDollX, prevDollY, dollX, dollY, dollCircleRadius);
@@ -1612,19 +2635,41 @@ export default class InteractionSystem {
                     logLabel = `MINUS -${subtractAmount}`;
                 }
             } else {
-                this.applyAuthoritativeEffectStep(skyEffect);
-                if (skyEffect.type === "multiply") {
-                    const multiplyFactor = Math.max(1, Number(skyEffect.value) || 1);
-                    this.showFloatingText(hitX, hitY - 26, `x${Number(multiplyFactor.toFixed(2))}`, "#60a5fa");
-                    logLabel = `MULTIPLY x${multiplyFactor}`;
-                } else if (skyEffect.type === "add") {
-                    const addAmount = Number(skyEffect.value) || 0;
-                    this.showFloatingText(hitX, hitY - 26, `+${Number(addAmount.toFixed(2))}`, "#4ade80");
-                    logLabel = `ADD +${addAmount}`;
-                } else if (skyEffect.type === "subtract") {
-                    const subtractAmount = Number(skyEffect.value) || 0;
-                    this.showFloatingText(hitX, hitY - 26, `-${Number(subtractAmount.toFixed(2))}`, "#f43f5e");
-                    logLabel = `MINUS -${subtractAmount}`;
+                // Sequence-aware authoritative hit
+                const isCorrectPlannedStep = item.isPlannedAuthoritativeItem && item.plannedStepIndex === this.currentPlannedStepIndex;
+                if (isCorrectPlannedStep) {
+                    this.applyAuthoritativeEffectStep(skyEffect);
+                    this.currentPlannedStepIndex++;
+                    if (GAME_CONFIG.debug?.enableLogs) {
+                        console.log(`[InteractionSystem] Planned sky hit index=${item.plannedStepIndex}, label=${item.text?.text}, newMultiplier=${this.multiplier}`);
+                    }
+                    
+                    // SYNC VELOCITY: 1:1 Parity with simulation to ensure zero path drift
+                    if (item.targetVX !== undefined) {
+                        this.dollController.velocity.x = item.targetVX;
+                        this.dollController.velocity.y = item.targetVY;
+                        this.dollController.airBoostTimerMs = item.targetAirBoostTimerMs || 0;
+                    }
+                    
+                    if (skyEffect.type === "multiply") {
+                        const multiplyFactor = Math.max(1, Number(skyEffect.value) || 1);
+                        this.showFloatingText(hitX, hitY - 26, item.text?.text || `x${Number(multiplyFactor.toFixed(2))}`, "#60a5fa");
+                        logLabel = `MULTIPLY x${multiplyFactor}`;
+                    } else if (skyEffect.type === "add") {
+                        const addAmount = Number(skyEffect.value) || 0;
+                        this.showFloatingText(hitX, hitY - 26, item.text?.text || `+${Number(addAmount.toFixed(2))}`, "#4ade80");
+                        logLabel = `ADD +${addAmount}`;
+                    } else if (skyEffect.type === "subtract") {
+                        const subtractAmount = Number(skyEffect.value) || 0;
+                        this.showFloatingText(hitX, hitY - 26, item.text?.text || `-${Number(subtractAmount.toFixed(2))}`, "#f43f5e");
+                        logLabel = `MINUS -${subtractAmount}`;
+                    }
+                } else {
+                    // Ignore out-of-order or random hits
+                    if (item.isPlannedAuthoritativeItem && GAME_CONFIG.debug?.enableLogs) {
+                         console.log(`[InteractionSystem] Ignored out-of-order planned sky hit: label=${item.text?.text}, itemStep=${item.plannedStepIndex}, currentStep=${this.currentPlannedStepIndex}`);
+                    }
+                    return;
                 }
             }
 
@@ -1644,19 +2689,48 @@ export default class InteractionSystem {
                 this.dollController.updateScoreValue?.(this.multiplier);
             }
 
+            if (this.authoritativeRound.enabled) {
+                const isMinus = (skyEffect.type === "subtract" || skyEffect.type === "divide");
+                
+                // Only apply raw impulse if velocity wasn't already synced from simulation
+                if (item.targetVX === undefined) {
+                    const imp = this.getAuthoritativeImpulse(skyEffect.type);
+                    this.dollController.applyImpulse(imp.x, imp.y, isMinus);
+                }
+
+                // Maintain original visuals and expressions
+                if (isMinus) {
+                    this.scene.audioManager?.play("sfx_hazard", { volume: 0.55 });
+                    this.scene.shakeOnHazard?.();
+                    this.dollController.setExpression("impact");
+                    this.dollController.lockExpressionFor(800);
+                    this.dollController.setTrailTheme?.("minus", 0);
+                } else {
+                    this.dollController.onGameplayInteraction?.("sky");
+                    this.dollController.setTrailTheme?.(skyEffect.type === "multiply" ? "x" : "plus", 0);
+                }
+                this.spawnImpactParticles("sky", hitX, hitY);
+            }
+
             // Only after applying the correct effect/impulse, recycle the node.
             this.recycleSkyMultiplier(item, dollX);
         }
 
         if (bestImpulse) {
-            const forceReset = (bestImpulse.label === "DROP!" || bestImpulse.label === "MINUS DROP");
-            this.dollController.applyImpulse(bestImpulse.x, bestImpulse.y, forceReset);
+            // ONLY apply random/drift impulses if NOT in authoritative mode.
+            // In authoritative rounds, only the planned impulses (applied above) are allowed.
+            if (!this.authoritativeRound.enabled) {
+                const forceReset = (bestImpulse.label === "DROP!" || bestImpulse.label === "MINUS DROP");
+                this.dollController.applyImpulse(bestImpulse.x, bestImpulse.y, forceReset);
+            }
         }
 
         // Update swept collision baseline, then repopulate sky stream for *next* frame.
         this.prevDollX = dollX;
         this.prevDollY = dollY;
-        this.maintainSkyMultiplierStream(dollX);
+        if (!this.authoritativeRound.enabled) {
+            this.maintainSkyMultiplierStream(dollX);
+        }
     }
 
     isDesktopProceduralAirThreat() {
@@ -1701,6 +2775,7 @@ export default class InteractionSystem {
     }
 
     maintainBombStream(dollX = 0) {
+        if (this.authoritativeRound.enabled) return;
         if (!this.proceduralBombs.length) return;
 
         const bt = this.getBombStreamTuning();
@@ -1804,6 +2879,7 @@ export default class InteractionSystem {
     }
 
     maintainBatStream(dollX = 0) {
+        if (this.authoritativeRound.enabled) return;
         if (!this.proceduralBats.length) return;
 
         const bt = this.getBatStreamTuning();
@@ -2150,6 +3226,36 @@ export default class InteractionSystem {
             }
 
             this.nextHazardSpawnX += Phaser.Math.Between(gapMin, gapMax);
+        }
+    }
+
+    triggerAuthoritativeLossObstacle(dollX, speedX) {
+        if (this.fatalLossObstacleSpawned) return;
+        
+        // Wait until all planned sky items have been collected
+        const plan = this.authoritativeRound;
+        const totalSteps = Array.isArray(plan.steps) ? plan.steps.length : 0;
+        if (this.currentPlannedStepIndex < totalSteps) return;
+
+        this.fatalLossObstacleSpawned = true;
+        
+        // The doll is on the ground. Calculate a natural-looking stopping distance.
+        // It shouldn't be too close (or it pops in under the doll) and not too far.
+        const spawnX = dollX + Math.max(220, Math.min(speedX * 1.1, 1200));
+        
+        const kinds = ["hole", "trafficcone", "roadblocker"];
+        const kind = kinds[Math.floor(Math.random() * kinds.length)];
+        
+        let candidate = null;
+        for (let i = 0; i < this.decorationHazards.length; i++) {
+            if (!this.decorationHazards[i].active) {
+                candidate = this.decorationHazards[i];
+                break;
+            }
+        }
+        
+        if (candidate) {
+            this.placeHazardProcedural(candidate, spawnX, kind);
         }
     }
 
@@ -3025,14 +4131,16 @@ export default class InteractionSystem {
         const cached = [];
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            if (!item?.active || !item.text) {
-                continue;
+            let b = null;
+            if (item.text && item.text.visible && (Number(item.text.alpha) || 0) > alphaTh) {
+                this.syncAirLaneTextWorld(item);
+                b = item.text.getBounds();
+            } else if (item.sprite && item.sprite.visible) {
+                b = item.sprite.getBounds();
+            } else if (item.shape && item.shape.visible) {
+                b = item.shape.getBounds();
             }
-            this.syncAirLaneTextWorld(item);
-            // HARD RULE: air-lane hits must be visible.
-            if (!item.text.visible) continue;
-            if ((Number(item.text.alpha) || 0) <= alphaTh) continue;
-            const b = item.text.getBounds();
+
             if (!b || b.width <= 1 || b.height <= 1) {
                 continue;
             }
@@ -3504,7 +4612,12 @@ export default class InteractionSystem {
         const rawX = Number(dollX) + (offset * lookDir);
         const spawnX = Phaser.Math.Clamp(rawX, minX, maxX);
 
-        const variant = Math.random() < 0.45 ? "roadblocker" : "trafficcone";
+        // Random ground obstacle for loss visual: hole / trafficcone / roadblocker.
+        // All three are valid — they only spawn on a server-decided LOSS round
+        // (win rounds never reach this branch), so the player sees a natural mix
+        // of "ground obstacle just happened to appear" outcomes.
+        const r = Math.random();
+        const variant = (r < 0.34) ? "hole" : (r < 0.67 ? "trafficcone" : "roadblocker");
         const visual = this.getHazardVisual(variant);
         const spawned = this.createHazardObject(
             spawnX,

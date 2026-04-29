@@ -272,6 +272,13 @@ export default class DollController {
 
     launch() {
         this.stopIdleFloating();
+        // --- HARD POSITION RESET ---
+        // Force the doll to start exactly where the simulation predicts.
+        const groundY = this.getGroundY();
+        this.position.x = GAME_CONFIG.doll.startX || 180;
+        this.position.y = groundY - (GAME_CONFIG.doll.startYOffsetFromGround || 120);
+        this.syncVisuals();
+
         // Defensive restore: prevent stale hidden state between rounds.
         this.restoreVisibleVisualState();
         this.forceVisibleNow();
@@ -286,8 +293,11 @@ export default class DollController {
 
         const launchXMultiplier = this.speedTuning.launchXMultiplier ?? 1;
         const launchYMultiplier = this.speedTuning.launchYMultiplier ?? 1;
-        this.velocity.x = GAME_CONFIG.doll.launchVelocityX * launchXMultiplier;
-        this.velocity.y = GAME_CONFIG.doll.launchVelocityY * launchYMultiplier;
+        
+        const isAuth = this.scene.interactionSystem?.authoritativeRound?.enabled;
+        this.velocity.x = isAuth ? 720 : (GAME_CONFIG.doll.launchVelocityX * launchXMultiplier);
+        this.velocity.y = isAuth ? -580 : (GAME_CONFIG.doll.launchVelocityY * launchYMultiplier);
+        this.airBoostTimerMs = isAuth ? 680 : 0;
 
         this.setExpression("determined");
         this.launchGraceRemainingMs = 320;
@@ -400,38 +410,45 @@ export default class DollController {
         }
         this.ensureRenderableWhenActive();
 
-        this.elapsedMs += deltaSeconds * 1000;
-        this.trailTimer += deltaSeconds;
-        this.expressionLockTimerMs = Math.max(0, this.expressionLockTimerMs - (deltaSeconds * 1000));
+        // Apply Global Time Scale (Fast Forward / Slow Motion)
+        const timeScale = this.speedTuning.timeScale || 1.0;
+        const scaledDelta = deltaSeconds * timeScale;
+
+        this.elapsedMs += scaledDelta * 1000;
+        this.trailTimer += scaledDelta;
+        this.expressionLockTimerMs = Math.max(0, this.expressionLockTimerMs - (scaledDelta * 1000));
         if (this.hardDiveRemainingMs > 0) {
-            this.hardDiveRemainingMs = Math.max(0, this.hardDiveRemainingMs - (deltaSeconds * 1000));
+            this.hardDiveRemainingMs = Math.max(0, this.hardDiveRemainingMs - (scaledDelta * 1000));
         }
         if (this.launchGraceRemainingMs > 0) {
-            this.launchGraceRemainingMs = Math.max(0, this.launchGraceRemainingMs - (deltaSeconds * 1000));
+            this.launchGraceRemainingMs = Math.max(0, this.launchGraceRemainingMs - (scaledDelta * 1000));
         }
         if (this.trailThemeRemainingMs > 0) {
-            this.trailThemeRemainingMs = Math.max(0, this.trailThemeRemainingMs - (deltaSeconds * 1000));
+            this.trailThemeRemainingMs = Math.max(0, this.trailThemeRemainingMs - (scaledDelta * 1000));
         }
 
         const gravityMultiplier = this.speedTuning.gravityMultiplier ?? 1;
-        if (this.airBoostTimerMs > 0) {
-            this.airBoostTimerMs = Math.max(0, this.airBoostTimerMs - (deltaSeconds * 1000));
-        }
+        const gravity = (this.scene.interactionSystem?.authoritativeRound?.enabled) ? 620 : (GAME_CONFIG.doll.gravity * gravityMultiplier);
+        
         const airBoostGravityScale = this.airBoostTimerMs > 0 ? 0.28 : 1;
-        this.velocity.y += GAME_CONFIG.doll.gravity * gravityMultiplier * airBoostGravityScale * deltaSeconds;
+        if (this.airBoostTimerMs > 0) {
+            this.airBoostTimerMs = Math.max(0, this.airBoostTimerMs - (scaledDelta * 1000));
+        }
+        this.velocity.y += gravity * airBoostGravityScale * scaledDelta;
 
         // Smooth glide feel: while boost is active, reduce harsh downward snap.
         if (this.airBoostTimerMs > 0 && this.velocity.y > 80) {
-            this.velocity.y *= 0.81; // Stronger damping for floatier glide
+            // Frame-rate independent damping
+            this.velocity.y *= Math.pow(0.81, scaledDelta * 60); 
         }
-        this.position.x += this.velocity.x * deltaSeconds;
-        this.position.y += this.velocity.y * deltaSeconds;
+        this.position.x += this.velocity.x * scaledDelta;
+        this.position.y += this.velocity.y * scaledDelta;
         this.maxX = Math.max(this.maxX, this.position.x);
         this.minY = Math.min(this.minY, this.position.y);
 
         const collisionThreshold = this.groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
         const isOnGround = !this.isFallingInHole && this.position.y >= collisionThreshold - 1;
-        this.groundedMs = isOnGround ? (this.groundedMs + (deltaSeconds * 1000)) : 0;
+        this.groundedMs = isOnGround ? (this.groundedMs + (scaledDelta * 1000)) : 0;
 
         // Play a one-shot "hit" when we touch ground (air -> ground transition).
         if (isOnGround && !this.wasOnGround) {
@@ -444,13 +461,13 @@ export default class DollController {
         if (isOnGround) {
             // Speed-synced rolling: circumference of visual match travel
             const rollFactor = 0.22; 
-            this.doll.angle += this.velocity.x * rollFactor * 60 * deltaSeconds;
+            this.doll.angle += this.velocity.x * rollFactor * 60 * scaledDelta;
         } else {
             // Air trajectory tilt (skip when doing a "Superman" roll)
             if (this.currentExpression === "happy" && this.happySpinRemainingDeg > 0) {
                 // One-time Superman roll on +/x hit: exactly 1 rotation, then stop.
                 const spinSpeedDegPerSec = 720;
-                const deltaDeg = Math.min(this.happySpinRemainingDeg, spinSpeedDegPerSec * deltaSeconds);
+                const deltaDeg = Math.min(this.happySpinRemainingDeg, spinSpeedDegPerSec * scaledDelta);
                 this.doll.angle += deltaDeg;
                 this.happySpinRemainingDeg = Math.max(0, this.happySpinRemainingDeg - deltaDeg);
             } else {
@@ -989,21 +1006,21 @@ export default class DollController {
             this.currentValueText = this.scene.add.text(0, 0, "", {
                 fontFamily: '"Luckiest Guy", cursive',
                 fontSize: "36px",
-                color: "#fff200",
-                stroke: "#a16207",
-                strokeThickness: 2,
-                shadow: { offsetX: 3, offsetY: 3, color: "#a16207", blur: 0, stroke: true, fill: true }
+                color: "#FFD700", // Standard Yellow
+                stroke: "#000000", // Black Outline
+                strokeThickness: 8,
+                fontStyle: "bold"
             }).setOrigin(0.5).setDepth(40);
             this.scoreContainer.add(this.currentValueText);
         }
 
         const config = {
-            fontFamily: '"Bubblegum Sans", cursive',
+            fontFamily: '"Luckiest Guy", cursive',
             fontSize: "28px",
-            color: color, 
+            color: "#FFFFFF", // Standard White for history
             stroke: "#000000",
-            strokeThickness: 4,
-            shadow: { offsetX: 3, offsetY: 3, color: "rgba(0,0,0,0.5)", blur: 2, fill: true, stroke: true }
+            strokeThickness: 6,
+            fontStyle: "bold"
         };
         const text = this.scene.add.text(0, 0, value, config).setOrigin(0.5);
         text.alpha = 0; // Starts invisible but will fade in

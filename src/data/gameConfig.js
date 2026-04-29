@@ -184,7 +184,9 @@ export const GAME_CONFIG = {
 
     // Softer sim on narrow mobile GPUs (e.g. jerky flight under high timeScale or frame spikes).
     performance: {
-        mobileGameplayTimeScaleCap: 1.12,
+        // Allow full ULTRA speed (1.90) on mobile too — players explicitly select
+        // a speed mode and expect it to take effect everywhere.
+        mobileGameplayTimeScaleCap: 2.0,
         mobilePhysicsDeltaCapMs: 30
     },
 
@@ -214,12 +216,12 @@ export const GAME_CONFIG = {
             timeScale: 1.50
         },
         ULTRA: {
-            launchXMultiplier: 1.65,
-            launchYMultiplier: 1.38,
-            gravityMultiplier: 1.26,
-            frictionMultiplier: 0.96,
-            travelMultiplier: 1.65,
-            timeScale: 2.30
+            launchXMultiplier: 1.30,
+            launchYMultiplier: 1.15,
+            gravityMultiplier: 1.15,
+            frictionMultiplier: 0.98,
+            travelMultiplier: 1.30,
+            timeScale: 1.90
         }
     },
 

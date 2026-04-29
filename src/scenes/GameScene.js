@@ -311,7 +311,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     update(time, delta) {
-        const timeScale = Math.max(0.5, Math.min(1.6, Number(this.gameplayTimeScale) || 1));
+        // Allow up to 2.0× so ULTRA speed mode (timeScale 1.90) is honoured.
+        const timeScale = Math.max(0.5, Math.min(2.0, Number(this.gameplayTimeScale) || 1));
         let deltaSeconds = (delta / 1000) * timeScale;
         const layout = this.getViewportLayout?.() || { isMobile: false };
         const capMs = layout.isMobile ? (GAME_CONFIG.performance?.mobilePhysicsDeltaCapMs ?? 0) : 0;
@@ -334,7 +335,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     setGameplayTimeScale(scale = 1) {
-        let s = Math.max(0.5, Math.min(1.6, Number(scale) || 1));
+        let s = Math.max(0.5, Math.min(2.0, Number(scale) || 1));
         const layout = this.getViewportLayout?.() || { isMobile: false };
         const mobileCap = GAME_CONFIG.performance?.mobileGameplayTimeScaleCap;
         if (layout.isMobile && mobileCap != null && mobileCap > 0) {

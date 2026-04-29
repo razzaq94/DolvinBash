@@ -1,5 +1,6 @@
 import { GAME_STATES } from "./GameStateManager.js";
 import { GAME_CONFIG } from "../data/gameConfig.js";
+import AuthoritativeRoundPlanner from "./AuthoritativeRoundPlanner.js";
 
 export default class RoundManager {
     constructor(scene, gameStateManager, dollController, kickerController, interactionSystem, resultSystem, uiManager) {
@@ -104,28 +105,20 @@ export default class RoundManager {
     getAuthoritativeFlightPlan() {
         const ext = this.externalRoundData;
         const crashPoint = this.parseExternalNumber(ext?.crashPoint);
+        const winAmount = this.parseExternalNumber(ext?.winAmount);
+        const betAmount = this.parseExternalNumber(ext?.betAmount) || this.currentBet || 0;
+        const roundId = String(ext?.roundId || "unknown");
+
         if (!Number.isFinite(crashPoint) || crashPoint <= 0) {
             return null;
         }
-        const targetMultiplier = Math.max(1, Number(crashPoint.toFixed(2)));
-        const winAmount = this.parseExternalNumber(ext?.winAmount);
-        const forceLoss = Number.isFinite(winAmount) ? winAmount <= 0 : false;
-        // Keep a deterministic and smooth flight window while ending exactly on crashPoint.
-        let durationMs = Phaser.Math.Clamp(
-            Math.round(650 + ((targetMultiplier - 1) * 260)),
-            650,
-            6500
-        );
-        // Loss rounds should crash fast (platform signal: crashPoint=1, winAmount=0).
-        if (forceLoss && targetMultiplier <= 1.01) {
-            durationMs = 1500;
-        }
-        return {
-            enabled: true,
-            targetMultiplier,
-            durationMs,
-            forceLoss
-        };
+
+        return AuthoritativeRoundPlanner.generatePlan({
+            roundId,
+            betAmount,
+            winAmount,
+            crashPoint
+        });
     }
 
     stopAuthoritativeFlightController() {
@@ -160,12 +153,8 @@ export default class RoundManager {
         this.authoritativeLossStageStartAtMs = 0;
         this.authoritativeLossRetryAtMs = 0;
         this.authoritativeLossVisualHazard = null;
-        this.interactionSystem.setAuthoritativeRoundControl?.({
-            enabled: true,
-            targetMultiplier: plan.targetMultiplier,
-            forceLoss: !!plan.forceLoss,
-            durationMs: plan.durationMs
-        });
+        // Pass the full generated plan. Passing only a partial object disables the planner.
+        this.interactionSystem.setAuthoritativeRoundControl?.(plan);
         this.interactionSystem.setAuthoritativeLiveMultiplier?.(1);
 
         this.authoritativeFlightEvent = this.scene.time.addEvent({
@@ -175,41 +164,59 @@ export default class RoundManager {
                 if (!this.isRoundActive || !this.gameStateManager.isState(GAME_STATES.FLYING)) {
                     return;
                 }
+
                 const elapsed = Math.max(0, performance.now() - this.authoritativeStartAtMs);
                 this.interactionSystem.setAuthoritativeTimelineProgress?.(elapsed, plan.durationMs);
+
+                const currentStep = Number(this.interactionSystem?.currentPlannedStepIndex ?? 0);
+                const totalSteps = Array.isArray(plan.steps) ? plan.steps.length : 0;
+                const pathComplete = totalSteps > 0 && currentStep >= totalSteps;
+
                 if (!this.authoritativeTargetReached) {
-                    const progress = Phaser.Math.Clamp(elapsed / plan.durationMs, 0, 1);
+                    const progress = Phaser.Math.Clamp(elapsed / Math.max(1, plan.durationMs), 0, 1);
                     this.sustainAuthoritativeFlight(plan, progress);
-                    if (progress >= 1) {
+
+                    // Do not crash from time progress alone. Crash only when the planned visible path is complete.
+                    if (pathComplete) {
                         this.authoritativeTargetReached = true;
                     }
-                }
-
-                if (
-                    this.authoritativeTargetReached
-                    && plan.forceLoss
-                    && !this.authoritativeLossVisualStarted
-                    && this.isReadyForAuthoritativeRollingLossStage()
-                ) {
-                    this.triggerAuthoritativeLossVisual(plan);
-                }
-                if (
-                    this.authoritativeTargetReached
-                    && plan.forceLoss
-                    && !this.authoritativeLossResolved
-                    && this.isReadyForAuthoritativeRollingLossStage()
-                ) {
-                    this.triggerAuthoritativeLossVisual(plan, { forceRetry: true });
                 }
 
                 if (this.authoritativeTargetReached && !this.authoritativeForcedLandingApplied) {
                     const vx = Number(this.dollController?.velocity?.x ?? 0);
                     const dir = vx >= 0 ? 1 : -1;
                     const downY = 920;
-                    // Force a controlled end descent after crashPoint is reached.
                     const downX = Math.max(120, Math.abs(vx));
                     this.dollController.applyImpulse?.(downX * dir, downY, true);
                     this.authoritativeForcedLandingApplied = true;
+                    if (plan.isLoss) {
+                        this.authoritativeLossGroundStartMs = performance.now();
+                    }
+                }
+
+                // LOSS ROUND: Keep doll rolling toward spawned fatal obstacle
+                if (this.authoritativeTargetReached && plan.isLoss && this.authoritativeForcedLandingApplied && !this.authoritativeLossResolved) {
+                    const dc = this.dollController;
+                    const groundY = Number(dc?.getGroundY?.() ?? dc?.groundY ?? 0);
+                    const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+                    const dollY = Number(dc?.position?.y ?? threshold);
+                    const isOnGround = dollY >= (threshold - 6);
+                    const vx = Math.abs(Number(dc?.velocity?.x ?? 0));
+
+                    // If on ground and slowing down, keep pushing forward
+                    if (isOnGround && vx < 180) {
+                        const dir = (dc?.velocity?.x ?? 1) >= 0 ? 1 : -1;
+                        dc.applyImpulse?.(260 * dir, 0, false);
+                        dc.isActive = true;
+                    }
+
+                    // Safety timeout: if 5 seconds pass and obstacle never hit, force-finish
+                    const groundMs = performance.now() - (this.authoritativeLossGroundStartMs || performance.now());
+                    if (groundMs > 5000) {
+                        this.hitHazard = true;
+                        this.authoritativeLossResolved = true;
+                        this.finishRound(true);
+                    }
                 }
             }
         });
@@ -264,25 +271,86 @@ export default class RoundManager {
         if (!dc?.doll) return;
         const now = performance.now();
         if (!force && now < this.authoritativeSustainNextAtMs) return;
-        const groundY = Number(dc.getGroundY?.() ?? dc.groundY ?? 0);
-        const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
-        const dollY = Number(dc.position?.y ?? threshold);
-        const nearGround = dollY >= (threshold - 24);
-        if (!nearGround) return;
 
-        const vx = Number(dc.velocity?.x ?? 0);
-        const vy = Number(dc.velocity?.y ?? 0);
-        if (!force && Math.abs(vy) > 220) return;
-        const dir = vx >= 0 ? 1 : -1;
-        const targetMul = Math.max(1, Number(plan.targetMultiplier) || 1);
-        const mulRatio = Phaser.Math.Clamp((targetMul - 1) / 32, 0, 1);
-        const progressRatio = Phaser.Math.Clamp(progress, 0, 1);
-        const sustainPower = Math.round(180 + (120 * mulRatio) + (70 * progressRatio));
-        const sustainForward = Math.max(120, 130 + (targetMul * 2.8));
-        // Gentle hop sustain to preserve original gameplay feel.
-        dc.applyImpulse?.(sustainForward * dir, -sustainPower, false);
-        dc.setExpression?.("determined");
-        this.authoritativeSustainNextAtMs = now + (force ? 90 : 240);
+        const plannedItems = this.scene.interactionSystem?.allItems || [];
+        const nextTarget = plannedItems.find(it => it.isPlannedAuthoritativeItem && it.plannedStepIndex === Number(this.interactionSystem?.currentPlannedStepIndex ?? 0));
+        
+        if (nextTarget && nextTarget.active) {
+            const dollX = dc.doll.x;
+            const dollY = dc.doll.y;
+            
+            // --- AGGRESSIVE TARGET SKIPPING ---
+            // If the doll has already passed this item's X position, skip to the next step
+            // to prevent the doll from trying to steer backward.
+            if (dollX > nextTarget.x + 50) {
+                // Do not skip planned steps just because the doll passed the X position.
+                // Skipping would make the live multiplier miss a visible event and break convergence.
+                dc.velocity.x = Math.max(260, Math.abs(dc.velocity?.x ?? 260)) * 0.55;
+                return;
+            }
+
+            const dx = nextTarget.x - dollX;
+            const dy = nextTarget.y - dollY;
+            
+            const vx = Math.abs(dc.velocity?.x ?? 0);
+            const vy = dc.velocity?.y ?? 0;
+            const gravity = (GAME_CONFIG.doll.gravity || 850) * (dc.speedTuning?.gravityMultiplier ?? 1.0);
+            const deltaSeconds = (this.scene.game.loop.delta || 16.6) / 1000;
+
+            if (dx > 10 && vx > 50) {
+                // --- THE RAIL ENGINE: ULTIMATE PATH LOCK ---
+                // Instead of gentle steering, we now FORCE the doll onto the predicted rail.
+                const timeToTarget = dx / vx;
+                const gravity = (GAME_CONFIG.doll.gravity || 850) * (dc.speedTuning?.gravityMultiplier ?? 1.0);
+                
+                // Calculate the exact vertical velocity needed to hit the center
+                const idealVY = (dy - (0.5 * gravity * Math.pow(timeToTarget, 2))) / timeToTarget;
+                
+                // FIRST ITEM: Let the doll fly naturally — only gentle correction.
+                // Later items get full rail lock for guaranteed collision.
+                const isFirstItem = (nextTarget.plannedStepIndex === 0);
+                const velLerp = isFirstItem ? 0.12 : 0.45;
+                
+                // 1. VELOCITY INJECTION: Force the doll's vertical speed toward the ideal
+                dc.velocity.y = Phaser.Math.Linear(dc.velocity.y, idealVY, velLerp);
+                
+                // 2. POSITION ANCHORING: Pull the doll's Y toward the target line
+                // Skip for first item — let physics do the work naturally.
+                if (!isFirstItem) {
+                    const proximityBoost = (dx < 600) ? 0.38 : 0.08;
+                    const timeFactor = deltaSeconds * 60;
+                    const lerpFactor = 1 - Math.pow(1 - proximityBoost, timeFactor);
+                    dc.doll.y = Phaser.Math.Linear(dc.doll.y, nextTarget.y, lerpFactor);
+                }
+
+                // 3. CRUISE CONTROL: Maintain predicted horizontal speed
+                const targetVX = nextTarget.targetVX || 720;
+                const cruiseLerp = 1 - Math.pow(1 - 0.45, timeFactor);
+                dc.velocity.x = Phaser.Math.Linear(dc.velocity.x, targetVX, cruiseLerp);
+                
+                dc.setExpression?.("determined");
+            }
+            
+            // Tight update loop for continuous path correction
+            this.authoritativeSustainNextAtMs = now + 140;
+        } else {
+            // DEFAULT: Fallback for final crash or when no items are left
+            const groundY = Number(dc.getGroundY?.() ?? dc.groundY ?? 0);
+            const threshold = groundY - (GAME_CONFIG.doll.collisionYOffsetFromGround ?? 10);
+            const dollY = Number(dc.position?.y ?? dc.doll?.y ?? threshold);
+            const nearGround = dollY >= (threshold - 30);
+            if (!nearGround) return;
+
+            const vx = dc.velocity?.x ?? 0;
+            const dir = vx >= 0 ? 1 : -1;
+            const targetMul = Math.max(1, Number(plan.targetMultiplier) || 1);
+            const mulRatio = Phaser.Math.Clamp((targetMul - 1) / 32, 0, 1);
+            const sustainPower = Math.round(180 + (120 * mulRatio));
+            
+            dc.applyImpulse?.(150 * dir, -sustainPower, false);
+            dc.setExpression?.("determined");
+            this.authoritativeSustainNextAtMs = now + 240;
+        }
     }
 
     startPrototypeRound({ fromAutoplay = false, externalRoundData = null, fromPlatform = false } = {}) {
@@ -369,6 +437,9 @@ export default class RoundManager {
             volatility: this.currentVolatility
         });
         const speedCfg = GAME_CONFIG.speedModes?.[this.currentSpeedMode] || GAME_CONFIG.speedModes?.NORMAL || {};
+        // Speed mode applies in BOTH legacy and authoritative rounds — it only
+        // scales the visual pace of the game, not the server-determined outcome
+        // (final multiplier / win amount stay exact).
         this.scene.setGameplayTimeScale?.(speedCfg.timeScale ?? 1);
         this.currentPattern = this.pickEncounterPattern();
 
@@ -376,12 +447,7 @@ export default class RoundManager {
         this.dollController.reset();
         this.kickerController.reset();
         this.interactionSystem.loadPattern(this.currentPattern);
-        this.interactionSystem.setAuthoritativeRoundControl?.({
-            enabled: !!this.authoritativeFlightPlan,
-            targetMultiplier: this.authoritativeFlightPlan?.targetMultiplier ?? 1,
-            forceLoss: !!this.authoritativeFlightPlan?.forceLoss,
-            durationMs: this.authoritativeFlightPlan?.durationMs ?? 0
-        });
+        this.interactionSystem.setAuthoritativeRoundControl?.(this.authoritativeFlightPlan);
         if (this.authoritativeFlightPlan?.enabled) {
             // Hard reset visible live multiplier so no stale value appears between rounds.
             this.interactionSystem.setAuthoritativeLiveMultiplier?.(1);
@@ -467,22 +533,22 @@ export default class RoundManager {
                         this.sustainAuthoritativeFlight(this.authoritativeFlightPlan, progress, { force: true });
                         return;
                     }
-                    if (this.authoritativeFlightPlan.forceLoss) {
+                    if (this.authoritativeFlightPlan.isLoss) {
                         if (this.dollController.isFallingInHole && !this.authoritativeLossResolved) {
                             return;
                         }
-                        if (!this.authoritativeLossResolved) {
-                            const stageMs = Math.max(0, performance.now() - (this.authoritativeLossStageStartAtMs || performance.now()));
-                            if (this.isReadyForAuthoritativeRollingLossStage()) {
-                                this.triggerAuthoritativeLossVisual(this.authoritativeFlightPlan, { forceRetry: true });
-                            }
-                            if (stageMs < 2600) {
-                                return;
-                            }
+                        // DON'T end the round here — the doll must keep rolling forward
+                        // until it physically collides with the spawned fatal ground obstacle.
+                        // Re-impulse the doll to keep it moving toward the obstacle.
+                        const dc = this.dollController;
+                        const vx = Math.abs(Number(dc?.velocity?.x ?? 0));
+                        if (vx < 60) {
+                            // Doll is almost stopped but hasn't hit the obstacle yet.
+                            // Give it a gentle push forward to reach it.
+                            const dir = (dc?.velocity?.x ?? 1) >= 0 ? 1 : -1;
+                            dc.applyImpulse?.(220 * dir, 0, false);
+                            dc.isActive = true;
                         }
-                        // Strict server authority: forceLoss from platform always resolves as loss.
-                        this.hitHazard = true;
-                        this.finishRound(true);
                         return;
                     }
                     const target = Number(this.authoritativeFlightPlan.targetMultiplier) || 1;
@@ -490,7 +556,7 @@ export default class RoundManager {
                     if (current < (target - 0.01)) {
                         this.interactionSystem.setAuthoritativeLiveMultiplier?.(target);
                     }
-                    this.hitHazard = !!this.authoritativeFlightPlan.forceLoss;
+                    this.hitHazard = !!this.authoritativeFlightPlan.isLoss;
                     this.finishRound(this.hitHazard);
                     return;
                 }
@@ -506,7 +572,7 @@ export default class RoundManager {
             this.interactionSystem.onHazardHit = (item, isFatal) => {
                 if (this.authoritativeFlightPlan?.enabled) {
                     this.scene.shakeOnHazard?.();
-                    if (isFatal && this.authoritativeFlightPlan.forceLoss) {
+                    if (isFatal && this.authoritativeFlightPlan.isLoss) {
                         this.hitHazard = true;
                         this.authoritativeLossResolved = true;
                         if (item?.variant === "hole") {
@@ -605,6 +671,16 @@ export default class RoundManager {
                 volatility: this.currentVolatility,
                 patternId: this.lastResult.patternId || ""
             });
+
+            if (GAME_CONFIG.debug?.enableLogs && this.authoritativeFlightPlan?.enabled) {
+                const liveMul = Number(this.interactionSystem.getMultiplier() || 1);
+                const targetMul = Number(this.authoritativeFlightPlan.targetMultiplier || 1);
+                console.log(`[RoundManager] Authoritative round ended:`);
+                console.log(` - Live Multiplier: ${liveMul}`);
+                console.log(` - Target Multiplier: ${targetMul}`);
+                console.log(` - Difference: ${Number((liveMul - targetMul).toFixed(4))}`);
+                console.log(` - Win Amount: ${this.lastResult.payout}`);
+            }
 
             // Auto play: replay and start next round automatically.
             const prevRemaining = this.autoPlayRemaining;

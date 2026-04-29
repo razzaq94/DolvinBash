@@ -3,12 +3,13 @@
     --glass-border: rgba(148, 163, 184, 0.18);
     --accent-primary: #60a5fa;
     --accent-success: #4ade80;
-    --accent-warning: #fb923c;
+    --accent-warning: #FFD700; /* Unified Bright Yellow */
     --accent-danger: #f43f5e;
     --accent-special: #a855f7;
     --text-main: #f8fafc;
     --text-dim: #94a3b8;
     --ui-scale: 1;
+    --outline-black: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 2px 0 #000, 0 -2px 0 #000, 2px 0 0 #000, -2px 0 0 #000;
 }
 
 /* Orientation lock: block landscape on mobile/tablet */
@@ -75,7 +76,7 @@
     height: 100%;
     pointer-events: none;
     z-index: 9999;
-    font-family: 'Bubblegum Sans', 'Outfit', sans-serif;
+    font-family: 'Luckiest Guy', 'Bubblegum Sans', 'Outfit', sans-serif;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -342,10 +343,11 @@
 }
 
 .pengu-value {
-    font-family: 'Bubblegum Sans', 'Outfit', sans-serif;
+    font-family: 'Luckiest Guy', cursive;
     font-size: clamp(16px, 1.55vw, 20px);
-    font-weight: 800;
+    font-weight: 400;
     color: var(--text-main);
+    text-shadow: var(--outline-black);
     line-height: 1.05;
     white-space: nowrap;
     overflow: hidden;
@@ -429,10 +431,11 @@
 }
 
 .bet-value {
-    font-family: 'Bubblegum Sans', cursive;
+    font-family: 'Luckiest Guy', cursive;
     font-size: 28px;
     font-weight: 400;
     color: var(--text-main);
+    text-shadow: var(--outline-black);
 }
 
 .bet-value.success {
@@ -714,10 +717,12 @@
 }
 
 .result-title {
-    font-family: 'Bubblegum Sans', cursive;
+    font-family: 'Luckiest Guy', cursive;
     font-size: 42px;
     font-weight: 400;
     margin-bottom: 24px;
+    color: var(--accent-success);
+    text-shadow: var(--outline-black);
     pointer-events: none;
     user-select: none;
 }
@@ -744,10 +749,11 @@
 }
 
 .stat-value {
+    font-family: 'Luckiest Guy', cursive;
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 400;
     color: var(--text-main);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+    text-shadow: 1px 1px 0 #000;
 }
 
 /* Mobile Adjustments (Horizontal Scaling) */
