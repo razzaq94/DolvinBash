@@ -26,9 +26,7 @@ export default class AuthoritativeRoundPlanner {
         // 2) CREATE ROUND PLAN
         // Choose step count based on crashPoint
         let stepCount;
-        if (isLoss && targetMultiplier <= 1.01) {
-            stepCount = 1;
-        } else if (targetMultiplier <= 3) {
+        if (targetMultiplier <= 3) {
             stepCount = Math.floor(rng() * 4) + 6; // 6 to 9
         } else if (targetMultiplier <= 10) {
             stepCount = Math.floor(rng() * 6) + 10; // 10 to 15
@@ -40,8 +38,7 @@ export default class AuthoritativeRoundPlanner {
 
         // Calculate duration based on crashPoint: ensure high crash points have enough "runway"
         let durationMs = 3000 + (targetMultiplier * 380); 
-        durationMs = Math.max(3000, Math.min(durationMs, 25000));
-        if (isLoss && targetMultiplier <= 1.01) durationMs = 1500;
+        durationMs = Math.max(3500, Math.min(durationMs, 25000));
 
         const steps = this._generateStepSequence(rng, targetMultiplier, stepCount, isLoss);
 
@@ -80,18 +77,6 @@ export default class AuthoritativeRoundPlanner {
     static _generateStepSequence(rng, target, count, isLoss) {
         const steps = [];
         let currentMultiplier = 1.00;
-
-        if (isLoss && target <= 1.01) {
-            return [{
-                stepIndex: 0,
-                type: "add",
-                value: 0,
-                label: "+0.00",
-                multiplierBefore: 1,
-                multiplierAfter: 1,
-                expectedHit: true
-            }];
-        }
 
         const stepCount = Math.max(2, Math.round(Number(count) || 6));
         const growthSteps = Math.max(1, stepCount - 1);
@@ -159,7 +144,8 @@ export default class AuthoritativeRoundPlanner {
 
         for (let i = 0; i < growthSteps; i++) {
             const before = currentMultiplier;
-            const remainingGap = Math.max(0.05, target - currentMultiplier);
+            // Force a minimum gap even if we are at or above target (for variety in loss paths)
+            const remainingGap = Math.max(0.15, target - currentMultiplier);
             const remainingGrowthSteps = Math.max(1, growthSteps - i);
             const lastType = steps.length > 0 ? steps[steps.length - 1].type : null;
             let type = pickWeightedType(currentMultiplier, lastType);
