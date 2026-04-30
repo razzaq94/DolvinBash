@@ -20,7 +20,7 @@ export default class AuthoritativeRoundPlanner {
         const numericSeed = this._resolveNumericSeed(roundId, betAmount, winAmount, crashPoint);
         const rng = this._createSeededRNG(numericSeed);
 
-        const targetMultiplier = Math.max(1, Number(crashPoint.toFixed(2)));
+        const targetMultiplier = Number(crashPoint.toFixed(2));
         const isLoss = winAmount <= 0;
 
         // 2) CREATE ROUND PLAN
@@ -106,11 +106,12 @@ export default class AuthoritativeRoundPlanner {
         const pickWeightedType = (current, lastType) => {
             // Re-balanced: + and * are favored (55%), but -, bat, and bomb (45%) still appear frequently
             const weights = { add: 40, subtract: 20, multiply: 15, bat: 12, divide: 13 };
-            // Feasibility: never let subtract/divide drag below 1.0
-            if (current <= 1.10) {
+            // Feasibility: never let subtract/divide drag below a reasonable floor or below the target.
+            const safetyFloor = Math.max(0.10, target * 0.9);
+            if (current <= safetyFloor) {
                 weights.subtract = 0;
                 weights.divide = 0;
-            } else if (current <= 1.40) {
+            } else if (current <= safetyFloor * 1.3) {
                 weights.divide = 0;
             }
             // Multiply is most useful before reaching the upper portion; soft taper near target.
@@ -177,12 +178,12 @@ export default class AuthoritativeRoundPlanner {
                     after = format(currentMultiplier + value);
                 }
             } else if (type === "subtract") {
-                const cap = Math.min(2.5, Math.max(0.20, (currentMultiplier - 1.0) * 0.65));
+                const cap = Math.min(2.5, Math.max(0.20, (currentMultiplier - 0.1) * 0.65));
                 value = format(Math.max(0.10, 0.20 + (rng() * cap)));
-                after = format(Math.max(1, currentMultiplier - value));
+                after = format(Math.max(0, currentMultiplier - value));
             } else if (type === "divide") {
                 value = format(1.20 + (rng() * 0.65)); // ÷1.20 .. ÷1.85
-                after = format(Math.max(1, currentMultiplier / value));
+                after = format(Math.max(0.01, currentMultiplier / value));
             }
 
             // Avoid perfectly flat steps.

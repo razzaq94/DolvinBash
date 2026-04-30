@@ -2087,7 +2087,7 @@ export default class InteractionSystem {
     setAuthoritativeLiveMultiplier(value) {
         if (!this.authoritativeRound.enabled) return;
         const prev = this.multiplier;
-        this.multiplier = this.clampMultiplier(Math.max(1, Number(value) || 1));
+        this.multiplier = this.clampMultiplier(Math.max(0, Number(value) || 0));
         if (this.multiplier !== prev) {
             this.emitMultiplierChanged();
             this.dollController.updateScoreValue?.(this.multiplier);
@@ -2109,13 +2109,14 @@ export default class InteractionSystem {
                 next = prev + value;
                 break;
             case "subtract":
-                next = Math.max(1, prev - value);
+                next = Math.max(0, prev - value);
                 break;
             case "multiply":
-                next = prev * Math.max(1, value);
+                next = prev * Math.max(0, value);
                 break;
             case "divide":
-                next = prev / Math.max(1, value);
+                // Avoid division by zero, but allow result to approach 0
+                next = prev / Math.max(0.01, value);
                 break;
         }
 
@@ -3918,7 +3919,7 @@ export default class InteractionSystem {
 
     clampMultiplier(value) {
         const rounded = Number((value ?? 1).toFixed(2));
-        return Phaser.Math.Clamp(rounded, 1, this.maxMultiplier);
+        return Phaser.Math.Clamp(rounded, 0, this.maxMultiplier);
     }
 
     isDesktopPlayLayout() {

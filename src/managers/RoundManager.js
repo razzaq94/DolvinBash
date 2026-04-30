@@ -772,12 +772,12 @@ export default class RoundManager {
         win = Math.max(0, Number(win.toFixed(2)));
 
         let finalMultiplier = Number(baseResult?.finalMultiplier) || 1;
-        if (Number.isFinite(crashPoint) && crashPoint > 0) {
+        if (Number.isFinite(crashPoint) && crashPoint >= 0) {
             finalMultiplier = Number(crashPoint.toFixed(2));
         } else if (bet > 0) {
             finalMultiplier = Number((win / bet).toFixed(2));
         }
-        finalMultiplier = Math.max(1, finalMultiplier);
+        finalMultiplier = Math.max(0, finalMultiplier);
 
         const hitHazard = win <= 0;
         const merged = {
