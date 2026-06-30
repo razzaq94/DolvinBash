@@ -26,6 +26,7 @@ export default class RoundManager {
         this.externalRoundData = null;
         this.awaitingExternalStart = false;
         this.externalStartTimeoutEvent = null;
+        this.externalStartFallbackEvent = null;
         this.pendingExternalStartFromAutoplay = false;
         this.authoritativeFlightEvent = null;
         this.authoritativeFlightPlan = null;
@@ -65,7 +66,22 @@ export default class RoundManager {
     }
 
     isPlatformIntegrated() {
+        if (window.__DOLVIN_STANDALONE__ === true) return false;
+        if (GAME_CONFIG.integration?.standaloneMode === true) return false;
         return typeof window?.onRoundStart === "function";
+    }
+
+    buildStandaloneRoundData(betAmount = 1) {
+        const bet = Math.max(0.01, Number(betAmount) || 1);
+        const crashPoint = Number((1.2 + Math.random() * 7.8).toFixed(2));
+        const isWin = Math.random() > 0.38;
+        const winAmount = isWin ? Number((bet * crashPoint).toFixed(2)) : 0;
+        return {
+            roundId: `demo_${Date.now()}`,
+            betAmount: bet,
+            winAmount,
+            crashPoint
+        };
     }
 
     requestRoundStart({ fromAutoplay = false } = {}) {
@@ -81,7 +97,14 @@ export default class RoundManager {
 
         // Standalone/demo (GitHub Pages, local server): no casino host — start immediately.
         if (!this.isPlatformIntegrated()) {
-            this.startPrototypeRound({ fromAutoplay, fromStandalone: true });
+            if (GAME_CONFIG.debug?.enableLogs) {
+                console.log("[RoundManager] Standalone start");
+            }
+            this.startPrototypeRound({
+                fromAutoplay,
+                fromStandalone: true,
+                externalRoundData: this.buildStandaloneRoundData(requestedBet)
+            });
             return;
         }
 
@@ -107,6 +130,26 @@ export default class RoundManager {
             this.pendingExternalStartFromAutoplay = false;
             this.uiManager.setAwaitingExternalStart?.(false);
             this.emitGameError("ROUND_START_TIMEOUT");
+        });
+
+        // Broken/missing host callback: don't leave the player stuck on WAIT...
+        this.externalStartFallbackEvent?.remove?.(false);
+        this.externalStartFallbackEvent = this.scene.time.delayedCall(1800, () => {
+            if (!this.awaitingExternalStart) return;
+            if (GAME_CONFIG.debug?.enableLogs) {
+                console.warn("[RoundManager] Platform startGame missing — falling back to standalone round");
+            }
+            const autoplay = this.pendingExternalStartFromAutoplay;
+            this.awaitingExternalStart = false;
+            this.pendingExternalStartFromAutoplay = false;
+            this.uiManager.setAwaitingExternalStart?.(false);
+            this.externalStartTimeoutEvent?.remove?.(false);
+            this.externalStartTimeoutEvent = null;
+            this.startPrototypeRound({
+                fromAutoplay: autoplay,
+                fromStandalone: true,
+                externalRoundData: this.buildStandaloneRoundData(requestedBet)
+            });
         });
     }
 
@@ -381,6 +424,8 @@ export default class RoundManager {
         this.uiManager.setAwaitingExternalStart?.(false);
         this.externalStartTimeoutEvent?.remove?.(false);
         this.externalStartTimeoutEvent = null;
+        this.externalStartFallbackEvent?.remove?.(false);
+        this.externalStartFallbackEvent = null;
 
         const requestedBet = Number(this.uiManager.getCurrentBet?.() ?? 0) || 0;
         const currentBalance = Number(this.uiManager.getCurrentBalance?.() ?? 0) || 0;
@@ -733,6 +778,8 @@ export default class RoundManager {
         this.pendingExternalStartFromAutoplay = false;
         this.externalStartTimeoutEvent?.remove?.(false);
         this.externalStartTimeoutEvent = null;
+        this.externalStartFallbackEvent?.remove?.(false);
+        this.externalStartFallbackEvent = null;
         this.stopAuthoritativeFlightController();
         this.uiManager.setAwaitingExternalStart?.(false);
 
@@ -750,6 +797,8 @@ export default class RoundManager {
         this.pendingExternalStartFromAutoplay = false;
         this.externalStartTimeoutEvent?.remove?.(false);
         this.externalStartTimeoutEvent = null;
+        this.externalStartFallbackEvent?.remove?.(false);
+        this.externalStartFallbackEvent = null;
         this.stopAuthoritativeFlightController();
         this.interactionSystem.setAuthoritativeRoundControl?.({ enabled: false, targetMultiplier: 1, forceLoss: false });
         this.uiManager.setAwaitingExternalStart?.(false);

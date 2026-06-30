@@ -59,6 +59,11 @@
     </div>
 
     <script>
+        // Demo / GitHub Pages: run without casino server. Casino hosts set false before this script.
+        window.__DOLVIN_STANDALONE__ = window.__DOLVIN_STANDALONE__ !== false;
+    </script>
+
+    <script>
         (function detectFileProtocol() {
             if (window.location.protocol !== "file:") return;
 

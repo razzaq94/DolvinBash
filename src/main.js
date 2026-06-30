@@ -2,6 +2,7 @@ import { GAME_CONFIG } from "./data/gameConfig.js";
 import BootScene from "./scenes/BootScene.js";
 import PreloadScene from "./scenes/PreloadScene.js";
 import GameScene from "./scenes/GameScene.js";
+import UIScene from "./scenes/UIScene.js";
 
 window.addEventListener("load", () => {
     const viewport = window.visualViewport;
@@ -45,7 +46,8 @@ window.addEventListener("load", () => {
         scene: [
             BootScene,
             PreloadScene,
-            GameScene
+            GameScene,
+            UIScene
         ]
     };
 

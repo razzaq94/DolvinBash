@@ -4,6 +4,11 @@ export const GAME_CONFIG = {
 
     backgroundColor: "#1e293b",
 
+    // Demo/GitHub Pages: true. Casino embed: set window.__DOLVIN_STANDALONE__ = false before load.
+    integration: {
+        standaloneMode: true
+    },
+
     round: {
         startingBalance: 1000,
         defaultBet: 1,
