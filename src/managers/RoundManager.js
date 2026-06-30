@@ -64,6 +64,10 @@ export default class RoundManager {
         return Number.isFinite(parsed) ? parsed : NaN;
     }
 
+    isPlatformIntegrated() {
+        return typeof window?.onRoundStart === "function";
+    }
+
     requestRoundStart({ fromAutoplay = false } = {}) {
         if (!this.gameStateManager.isState(GAME_STATES.BETTING)) return;
         if (this.awaitingExternalStart) return;
@@ -75,21 +79,25 @@ export default class RoundManager {
             return;
         }
 
+        // Standalone/demo (GitHub Pages, local server): no casino host — start immediately.
+        if (!this.isPlatformIntegrated()) {
+            this.startPrototypeRound({ fromAutoplay, fromStandalone: true });
+            return;
+        }
+
         this.awaitingExternalStart = true;
         this.pendingExternalStartFromAutoplay = !!fromAutoplay;
         this.uiManager.setAwaitingExternalStart?.(true);
 
-        const onRoundStart = window?.onRoundStart;
-        if (typeof onRoundStart === "function") {
-            try {
-                onRoundStart(requestedBet);
-            } catch (_) {
-                this.awaitingExternalStart = false;
-                this.uiManager.setAwaitingExternalStart?.(false);
-                this.pendingExternalStartFromAutoplay = false;
-                this.emitGameError("ROUND_START_CALLBACK_FAILED");
-                return;
-            }
+        const onRoundStart = window.onRoundStart;
+        try {
+            onRoundStart(requestedBet);
+        } catch (_) {
+            this.awaitingExternalStart = false;
+            this.uiManager.setAwaitingExternalStart?.(false);
+            this.pendingExternalStartFromAutoplay = false;
+            this.emitGameError("ROUND_START_CALLBACK_FAILED");
+            return;
         }
 
         this.externalStartTimeoutEvent?.remove?.(false);
@@ -353,7 +361,7 @@ export default class RoundManager {
         }
     }
 
-    startPrototypeRound({ fromAutoplay = false, externalRoundData = null, fromPlatform = false } = {}) {
+    startPrototypeRound({ fromAutoplay = false, externalRoundData = null, fromPlatform = false, fromStandalone = false } = {}) {
         if (!this.gameStateManager.isState(GAME_STATES.BETTING)) {
             console.warn("[RoundManager] Cannot start round. Current state is not BETTING.");
             if (fromPlatform) {
@@ -362,7 +370,7 @@ export default class RoundManager {
             return;
         }
 
-        if (!fromAutoplay && !fromPlatform) {
+        if (!fromAutoplay && !fromPlatform && !fromStandalone) {
             this.requestRoundStart();
             return;
         }
