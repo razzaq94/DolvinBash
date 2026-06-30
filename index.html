@@ -59,6 +59,23 @@
     </div>
 
     <script>
+        (function detectFileProtocol() {
+            if (window.location.protocol !== "file:") return;
+
+            const root = document.getElementById("game-root");
+            if (!root) return;
+
+            root.innerHTML = [
+                '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:24px;color:#e2e8f0;font-family:Inter,Arial,sans-serif;text-align:center;">',
+                '<div style="max-width:520px;">',
+                '<h1 style="font-size:28px;margin-bottom:12px;color:#fff;">Server required</h1>',
+                '<p style="line-height:1.6;margin-bottom:16px;">This game cannot run from a double-clicked HTML file. Browsers block game modules and assets on <code style="color:#93c5fd;">file://</code>.</p>',
+                '<p style="line-height:1.6;margin-bottom:16px;"><strong>Easy fix:</strong> double-click <code style="color:#93c5fd;">start.bat</code> in this folder.</p>',
+                '<p style="line-height:1.6;color:#94a3b8;">Or run: <code style="color:#93c5fd;">python -m http.server 8765</code> then open <code style="color:#93c5fd;">http://localhost:8765</code></p>',
+                '</div></div>'
+            ].join("");
+        })();
+
         (function uiScaleBootstrap() {
             const DESIGN_W = 1920;
             const DESIGN_H = 1080;
